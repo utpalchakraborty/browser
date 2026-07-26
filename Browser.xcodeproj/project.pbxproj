@@ -21,6 +21,13 @@
 			remoteGlobalIDString = A10000000000000000000020;
 			remoteInfo = Browser;
 		};
+		B20000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000010 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000020;
+			remoteInfo = Browser;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
@@ -45,6 +52,13 @@
 			path = BrowserPerformanceTests.xctest;
 			sourceTree = BUILT_PRODUCTS_DIR;
 		};
+		B20000000000000000000031 /* BrowserUITests.xctest */ = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.cfbundle;
+			includeInIndex = 0;
+			path = BrowserUITests.xctest;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -61,6 +75,11 @@
 		A10000000000000000000043 /* BrowserPerformanceTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = BrowserPerformanceTests;
+			sourceTree = "<group>";
+		};
+		B20000000000000000000041 /* BrowserUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = BrowserUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -87,6 +106,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B20000000000000000000051 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -95,6 +121,7 @@
 			children = (
 				A10000000000000000000041 /* Browser */,
 				A10000000000000000000042 /* BrowserTests */,
+				B20000000000000000000041 /* BrowserUITests */,
 				A10000000000000000000043 /* BrowserPerformanceTests */,
 				A10000000000000000000061 /* Products */,
 			);
@@ -105,6 +132,7 @@
 			children = (
 				A10000000000000000000031 /* Browser.app */,
 				A10000000000000000000032 /* BrowserTests.xctest */,
+				B20000000000000000000031 /* BrowserUITests.xctest */,
 				A10000000000000000000033 /* BrowserPerformanceTests.xctest */,
 			);
 			name = Products;
@@ -181,6 +209,29 @@
 			productReference = A10000000000000000000033 /* BrowserPerformanceTests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		B20000000000000000000020 /* BrowserUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B20000000000000000000070 /* Build configuration list for PBXNativeTarget "BrowserUITests" */;
+			buildPhases = (
+				B20000000000000000000081 /* Sources */,
+				B20000000000000000000051 /* Frameworks */,
+				B20000000000000000000091 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B20000000000000000000002 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B20000000000000000000041 /* BrowserUITests */,
+			);
+			name = BrowserUITests;
+			packageProductDependencies = (
+			);
+			productName = BrowserUITests;
+			productReference = B20000000000000000000031 /* BrowserUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -207,6 +258,10 @@
 						CreatedOnToolsVersion = 26.6;
 						TestTargetID = A10000000000000000000020;
 					};
+					B20000000000000000000020 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = A10000000000000000000020;
+					};
 				};
 			};
 			buildConfigurationList = A10000000000000000000072 /* Build configuration list for PBXProject "Browser" */;
@@ -226,6 +281,7 @@
 			targets = (
 				A10000000000000000000020 /* Browser */,
 				A10000000000000000000021 /* BrowserTests */,
+				B20000000000000000000020 /* BrowserUITests */,
 				A10000000000000000000022 /* BrowserPerformanceTests */,
 			);
 		};
@@ -247,6 +303,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		A10000000000000000000093 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B20000000000000000000091 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -277,6 +340,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B20000000000000000000081 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -289,6 +359,11 @@
 			isa = PBXTargetDependency;
 			target = A10000000000000000000020 /* Browser */;
 			targetProxy = A10000000000000000000003 /* PBXContainerItemProxy */;
+		};
+		B20000000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000020 /* Browser */;
+			targetProxy = B20000000000000000000001 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -494,6 +569,46 @@
 			};
 			name = Release;
 		};
+		B20000000000000000000111 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.utpalchakraborty.browser.ui-tests;
+				PRODUCT_MODULE_NAME = BrowserUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TEST_TARGET_NAME = Browser;
+			};
+			name = Debug;
+		};
+		B20000000000000000000112 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.utpalchakraborty.browser.ui-tests;
+				PRODUCT_MODULE_NAME = BrowserUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TEST_TARGET_NAME = Browser;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -520,6 +635,15 @@
 			buildConfigurations = (
 				A10000000000000000000131 /* Debug */,
 				A10000000000000000000132 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B20000000000000000000070 /* Build configuration list for PBXNativeTarget "BrowserUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B20000000000000000000111 /* Debug */,
+				B20000000000000000000112 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

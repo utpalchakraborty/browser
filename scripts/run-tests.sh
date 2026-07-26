@@ -2,8 +2,42 @@
 
 set -eu
 
+ui_only=0
+unit_only=0
+configuration=Debug
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --ui-only)
+            ui_only=1
+            ;;
+        --unit-only)
+            unit_only=1
+            ;;
+        --release)
+            configuration=Release
+            ;;
+        *)
+            echo "usage: $0 [--ui-only | --unit-only] [--release]" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+if [ "$ui_only" -eq 1 ] && [ "$unit_only" -eq 1 ]; then
+    echo "--ui-only and --unit-only are mutually exclusive" >&2
+    exit 2
+fi
+
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+if [ "$configuration" = "Release" ]; then
+    derived_data="$project_root/.build/ReleaseTestDerivedData"
+else
+    derived_data="$project_root/.build/DerivedData"
+fi
 fixture_port=18765
+fixture_recovery_port=18769
 fixture_log="$project_root/.build/fixture-server.log"
 
 mkdir -p "$project_root/.build"
@@ -18,6 +52,7 @@ fixture_token=${result_directory##*.}
     "$project_root/TestSupport/fixture_server.py" \
     --port "$fixture_port" \
     --token "$fixture_token" \
+    --recovery-port "$fixture_recovery_port" \
     >"$fixture_log" 2>&1 &
 fixture_pid=$!
 
@@ -39,12 +74,30 @@ do
     sleep 0.1
 done
 
-xcodebuild \
+set -- xcodebuild \
     -project "$project_root/Browser.xcodeproj" \
     -scheme Browser \
-    -configuration Debug \
+    -configuration "$configuration" \
     -destination "platform=macOS,arch=arm64" \
-    -derivedDataPath "$project_root/.build/DerivedData" \
+    -derivedDataPath "$derived_data" \
+    -enableCodeCoverage NO \
     -resultBundlePath "$result_bundle" \
-    -parallel-testing-enabled NO \
-    test
+    -parallel-testing-enabled NO
+
+if [ "$configuration" = "Release" ]; then
+    set -- "$@" ENABLE_TESTABILITY=YES
+    if [ "$unit_only" -eq 1 ]; then
+        set -- "$@" \
+            ENABLE_HARDENED_RUNTIME=NO \
+            OTHER_CODE_SIGN_FLAGS= \
+            CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES
+    fi
+fi
+
+if [ "$ui_only" -eq 1 ]; then
+    set -- "$@" -only-testing:BrowserUITests
+elif [ "$unit_only" -eq 1 ]; then
+    set -- "$@" -only-testing:BrowserTests
+fi
+
+"$@" test

@@ -10,10 +10,7 @@ final class WebKitEdgeCaseTests: XCTestCase {
                 uuidString: "A1000000-0000-4000-8000-000000000004"
             )!
         )
-        let sourceWebView = WKWebView(
-            frame: .zero,
-            configuration: profile.makeWebViewConfiguration()
-        )
+        let sourceWebView = profile.webViewFactory.makeWebView()
         try await WebViewNavigationWaiter().load(
             Phase1Fixture.url("/popup"),
             in: sourceWebView
@@ -52,10 +49,7 @@ final class WebKitEdgeCaseTests: XCTestCase {
                 uuidString: "A1000000-0000-4000-8000-000000000008"
             )!
         )
-        let sourceWebView = WKWebView(
-            frame: .zero,
-            configuration: profile.makeWebViewConfiguration()
-        )
+        let sourceWebView = profile.webViewFactory.makeWebView()
         try await WebViewNavigationWaiter().load(
             Phase1Fixture.url("/window-open"),
             in: sourceWebView
@@ -94,10 +88,7 @@ final class WebKitEdgeCaseTests: XCTestCase {
                 uuidString: "A1000000-0000-4000-8000-000000000005"
             )!
         )
-        let webView = WKWebView(
-            frame: .zero,
-            configuration: profile.makeWebViewConfiguration()
-        )
+        let webView = profile.webViewFactory.makeWebView()
         let waiter = WebViewNavigationWaiter(
             credential: URLCredential(
                 user: "phase1",
@@ -120,10 +111,7 @@ final class WebKitEdgeCaseTests: XCTestCase {
                 uuidString: "A1000000-0000-4000-8000-000000000006"
             )!
         )
-        let webView = WKWebView(
-            frame: .zero,
-            configuration: profile.makeWebViewConfiguration()
-        )
+        let webView = profile.webViewFactory.makeWebView()
         let downloadCreated = expectation(description: "download created")
         let destinationRequested = expectation(
             description: "download destination requested"
@@ -154,10 +142,7 @@ final class WebKitEdgeCaseTests: XCTestCase {
                 uuidString: "A1000000-0000-4000-8000-000000000007"
             )!
         )
-        let webView = WKWebView(
-            frame: .zero,
-            configuration: profile.makeWebViewConfiguration()
-        )
+        let webView = profile.webViewFactory.makeWebView()
 
         do {
             try await WebViewNavigationWaiter().load(

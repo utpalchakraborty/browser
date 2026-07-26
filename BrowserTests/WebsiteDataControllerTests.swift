@@ -12,10 +12,7 @@ final class WebsiteDataControllerTests: XCTestCase {
         )
         await dataController.clearAllWebsiteData()
 
-        var firstWebView: WKWebView? = WKWebView(
-            frame: .zero,
-            configuration: profile.makeWebViewConfiguration()
-        )
+        var firstWebView: WKWebView? = profile.webViewFactory.makeWebView()
         try await WebViewNavigationWaiter().load(
             Phase1Fixture.url("/cookie/set"),
             in: try XCTUnwrap(firstWebView)
@@ -35,10 +32,7 @@ final class WebsiteDataControllerTests: XCTestCase {
         XCTAssertEqual(sessionCookie.value, "transient")
         XCTAssertNil(sessionCookie.expiresDate)
 
-        let simultaneousWebView = WKWebView(
-            frame: .zero,
-            configuration: profile.makeWebViewConfiguration()
-        )
+        let simultaneousWebView = profile.webViewFactory.makeWebView()
         try await WebViewNavigationWaiter().load(
             Phase1Fixture.url("/cookie/echo"),
             in: simultaneousWebView
@@ -54,10 +48,7 @@ final class WebsiteDataControllerTests: XCTestCase {
         firstWebView = nil
 
         let reconstructedProfile = BrowserProfile(dataStoreIdentifier: identifier)
-        let secondWebView = WKWebView(
-            frame: .zero,
-            configuration: reconstructedProfile.makeWebViewConfiguration()
-        )
+        let secondWebView = reconstructedProfile.webViewFactory.makeWebView()
         try await WebViewNavigationWaiter().load(
             Phase1Fixture.url("/cookie/echo"),
             in: secondWebView
@@ -124,10 +115,7 @@ final class WebsiteDataControllerTests: XCTestCase {
         )
         await dataController.clearAllWebsiteData()
 
-        var webView: WKWebView? = WKWebView(
-            frame: .zero,
-            configuration: profile.makeWebViewConfiguration()
-        )
+        var webView: WKWebView? = profile.webViewFactory.makeWebView()
         try await WebViewNavigationWaiter().load(
             Phase1Fixture.url("/storage"),
             in: try XCTUnwrap(webView)
@@ -178,10 +166,7 @@ final class WebsiteDataControllerTests: XCTestCase {
             })
         )
 
-        webView = WKWebView(
-            frame: .zero,
-            configuration: profile.makeWebViewConfiguration()
-        )
+        webView = profile.webViewFactory.makeWebView()
         try await WebViewNavigationWaiter().load(
             Phase1Fixture.url("/storage"),
             in: try XCTUnwrap(webView)

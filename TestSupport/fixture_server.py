@@ -4,7 +4,9 @@ import argparse
 import base64
 import html
 import json
+import socket
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -13,6 +15,10 @@ class FixtureState:
     def __init__(self):
         self._lock = threading.Lock()
         self._request_counts = {}
+        self._reload_count = 0
+        self._recovery_port = None
+        self._recovery_server = None
+        self._recovery_enabled = False
 
     def record(self, path):
         with self._lock:
@@ -21,13 +27,76 @@ class FixtureState:
     def reset(self):
         with self._lock:
             self._request_counts = {}
+            self._reload_count = 0
+
+    def reset_reload_count(self):
+        with self._lock:
+            self._reload_count = 0
+
+    def next_reload_count(self):
+        with self._lock:
+            self._reload_count += 1
+            return self._reload_count
 
     def snapshot(self):
         with self._lock:
             return dict(self._request_counts)
 
+    def configure_recovery_port(self, port):
+        with self._lock:
+            self._recovery_port = port
+
+    def enable_recovery_server(self):
+        with self._lock:
+            if self._recovery_port is None:
+                return None
+            if self._recovery_server is None:
+                self._recovery_server = ThreadingHTTPServer(
+                    ("127.0.0.1", self._recovery_port),
+                    RecoveryHandler,
+                )
+                thread = threading.Thread(
+                    target=self._recovery_server.serve_forever,
+                    daemon=True,
+                )
+                thread.start()
+            self._recovery_enabled = True
+            return self._recovery_port
+
+    def recovery_is_enabled(self):
+        with self._lock:
+            return self._recovery_enabled
+
 
 STATE = FixtureState()
+
+
+class RecoveryHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def do_GET(self):
+        if not STATE.recovery_is_enabled():
+            self.close_connection = True
+            try:
+                self.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            self.connection.close()
+            return
+
+        body = (
+            "<!doctype html><title>Recovered</title>"
+            "<body>Recovered after retry</body>"
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format_string, *args):
+        return
 
 
 class FixtureHandler(BaseHTTPRequestHandler):
@@ -50,6 +119,46 @@ class FixtureHandler(BaseHTTPRequestHandler):
             self.send_json({"status": "reset"})
         elif path == "/stats":
             self.send_json(STATE.snapshot())
+        elif path == "/phase2/page-a":
+            self.send_html(
+                "<!doctype html><title>Page A</title>"
+                '<body><main id="page-a">Phase 2 Page A</main>'
+                '<a href="/phase2/page-b">Go to Page B</a></body>'
+            )
+        elif path == "/phase2/page-b":
+            self.send_html(
+                "<!doctype html><title>Page B</title>"
+                '<body><main id="page-b">Phase 2 Page B</main>'
+                '<a href="/phase2/page-a">Go to Page A</a></body>'
+            )
+        elif path == "/phase2/redirect":
+            self.send_bytes(
+                b"",
+                status=302,
+                extra_headers=[("Location", "/phase2/page-b")],
+            )
+        elif path == "/phase2/reload-count":
+            count = STATE.next_reload_count()
+            self.send_html(
+                f"<!doctype html><title>Reload {count}</title>"
+                f"<body>Reload count {count}</body>"
+            )
+        elif path == "/phase2/reload-reset":
+            STATE.reset_reload_count()
+            self.send_json({"reload_count": 0})
+        elif path == "/phase2/slow-response":
+            self.send_slow_html()
+        elif path == "/phase2/recovery-enable":
+            recovery_port = STATE.enable_recovery_server()
+            if recovery_port is None:
+                self.send_json(
+                    {"error": "recovery port is not configured"},
+                    status=409,
+                )
+            else:
+                self.send_json(
+                    {"recovery_origin": f"http://127.0.0.1:{recovery_port}"}
+                )
         elif path == "/cookie/set":
             self.send_html(
                 "<!doctype html><title>cookie set</title><body>cookie set</body>",
@@ -207,6 +316,34 @@ open
         self.end_headers()
         self.wfile.write(body)
 
+    def send_slow_html(self):
+        self.close_connection = True
+        chunks = [
+            b"<!doctype html><title>Slow response</title><body>",
+            b"<p>Slow response loading</p>",
+        ]
+        # Keep the final marker well beyond XCTest's UI-interaction overhead so
+        # the Stop assertion cannot race a naturally completed response.
+        chunks.extend(b"<span>bounded chunk</span>" for _ in range(40))
+        chunks.append(b"<p>Slow response complete</p></body>")
+        body_length = sum(len(chunk) for chunk in chunks)
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.send_header("Content-Length", str(body_length))
+        self.end_headers()
+
+        try:
+            for chunk in chunks:
+                self.wfile.write(chunk)
+                self.wfile.flush()
+                time.sleep(0.25)
+        except (BrokenPipeError, ConnectionResetError):
+            # Stopping the WKWebView load deliberately closes this response.
+            return
+
     def log_message(self, format_string, *args):
         return
 
@@ -215,9 +352,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=18765)
     parser.add_argument("--token", required=True)
+    parser.add_argument("--recovery-port", type=int)
     arguments = parser.parse_args()
 
     FixtureHandler.health_token = arguments.token
+    if arguments.recovery_port is not None:
+        STATE.configure_recovery_port(arguments.recovery_port)
     server = ThreadingHTTPServer(("127.0.0.1", arguments.port), FixtureHandler)
     server.serve_forever()
 

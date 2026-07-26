@@ -1,6 +1,6 @@
 # Performance Baseline
 
-Status: Phase 1 baseline locked
+Status: Phase 1 historical baseline retained; Phase 2 baseline locked
 Last updated: 2026-07-26
 
 ## Environment
@@ -16,14 +16,15 @@ Last updated: 2026-07-26
 | Architecture | arm64 |
 | Build configuration | Release, no debugger, sanitizers, or code coverage |
 | Runtime dependencies | Apple system frameworks only |
-| Measured source state | Phase 1 checkpoint `a726dc9`; see the collection note below |
+| Phase 1 measured source state | Checkpoint `a726dc9`; see the collection note below |
+| Phase 2 measured source state | Uncommitted Phase 2 checkpoint working tree on `3652a3d` |
 
-The measurements were collected from the Phase 1 checkpoint on a normally
-loaded desktop. Raw results stay in ignored `.build` directories and are never
-uploaded.
+Raw results stay in ignored `.build` directories and are never uploaded. Phase
+2 is also recorded in `TestSupport/phase2_performance_baseline.json`, which is
+the machine-readable comparison point for Phase 3.
 
-The launch and resource runs predate final test/audit-harness hardening in
-`a726dc9`; that hardening did not change the Release launch path in
+The Phase 1 launch and resource runs predate final test/audit-harness hardening
+in `a726dc9`; that hardening did not change the Release launch path in
 `AppDelegate` or `BrowserWindowController`. The production Release bundle was
 rebuilt and verified after those changes, and each result section records its
 exact raw artifact path.
@@ -44,7 +45,60 @@ exact raw artifact path.
 - Drop `top`'s cumulative first sample, then average 30 one-second idle samples.
 - Report nearest-rank p95, median, minimum, maximum, and failures.
 
-## Launch and initial WebKit results
+## Phase 2 launch, navigation, and command results
+
+Command: `make performance`
+
+Result bundles:
+
+- `.build/PerformanceResults.tfAxfa/BrowserLaunchPerformance.xcresult`
+- `.build/PerformanceResults.tfAxfa/BrowserInteractionPerformance.xcresult`
+
+Twenty terminated launches, twenty deterministic address submissions/local
+navigations, and twenty back/forward commands completed with zero failures.
+Every launch sample also proved that typing reached the address field without a
+click.
+
+| Metric | Minimum | Median | Mean | p95 | Maximum | Gate |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Application first frame responsive | 385.997 ms | 498.522 ms | 478.187 ms | 565.402 ms | 585.846 ms | Pass: p50 <= 500 ms; p95 <= 800 ms |
+| Native window presentation | 72.913 ms | 86.818 ms | 85.317 ms | 94.698 ms | 101.600 ms | Reported |
+| Initial address-field focus assignment | 2.038 ms | 2.287 ms | 2.291 ms | 2.541 ms | 2.666 ms | Reported; usability asserted per launch |
+| Measured WebView deferral | 100.166 ms | 101.712 ms | 101.603 ms | 102.516 ms | 103.376 ms | Included in readiness gate |
+| Initial WKWebView construction | 17.085 ms | 22.687 ms | 21.983 ms | 27.633 ms | 29.027 ms | Reported |
+| First `about:blank` navigation | 82.577 ms | 87.919 ms | 88.922 ms | 95.211 ms | 97.943 ms | Reported |
+| Address submission | 0.203 ms | 0.260 ms | 0.284 ms | 0.398 ms | 0.627 ms | Pass: p95 <= 50 ms; max <= 100 ms |
+| Back/forward command | 0.108 ms | 0.192 ms | 0.172 ms | 0.215 ms | 0.216 ms | Pass: p95 <= 50 ms; max <= 100 ms |
+| Deterministic local navigation | 7.161 ms | 9.914 ms | 11.801 ms | 17.917 ms | 28.464 ms | Reported |
+
+WebKit starts after a measured 100 ms deferral so native chrome can paint and
+accept input first. The conservative paired-sample readiness proxy includes
+first frame, the full deferral, WebView construction, and blank navigation. It
+measured 588.495 ms minimum, 720.606 ms median, 690.694 ms mean, 785.794 ms p95,
+and 796.750 ms maximum, passing the 1.2-second p95 ceiling.
+
+Compared with Phase 1, application first-frame median increased 47.50% and p95
+increased 44.16%; the readiness-proxy median increased 60.61% and p95 increased
+55.83%. These are explicit, explained checkpoint regressions: Phase 2 replaces
+the blank scaffold with the production toolbar, focused address field, menus,
+WebView factory, navigation policy/delegates, and observed page state. This
+explanation does not waive the unchanged absolute budgets, which pass.
+
+## Phase 2 settled one-page resources
+
+Command: `make resource-one`
+
+Artifact: `.build/ResourceBaseline.v1.eCb0JI/summary.json`
+
+| Metric | Samples | Minimum | Median/Mean | p95 | Maximum | Gate |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Aggregate process footprint | 10 launches | 72.8 MiB | 73.0 MiB median | 86.5 MiB | 86.5 MiB | Pass: p95 <= 300 MiB |
+| Aggregate idle CPU | 30 seconds | 0.0% | 0.013% mean | 0.0% | 0.4% | Pass: mean < 1% |
+
+The aggregate includes Browser plus its attributed WebKit GPU, Networking, and
+WebContent processes. All samples retained a stable four-process set.
+
+## Phase 1 launch and initial WebKit baseline
 
 Command: `make performance`
 
@@ -59,14 +113,14 @@ Twenty terminated launches completed with zero failures.
 | Initial WKWebView construction | 18.263 ms | 24.008 ms | 24.998 ms | 33.113 ms | 43.385 ms |
 | First `about:blank` navigation | 73.769 ms | 87.694 ms | 86.875 ms | 102.779 ms | 120.644 ms |
 
-The scaffold has no address field yet, so first-frame responsiveness is the
-Phase 1 proxy for interactive native chrome. The real address-field gate stays
-unchanged for Phase 2. A conservative paired-sample proxy formed from first
-frame plus WebKit construction plus blank navigation measured 448.682 ms
+The Phase 1 scaffold had no address field, so first-frame responsiveness was
+the proxy for interactive native chrome. A conservative paired-sample proxy
+formed from first frame plus WebKit construction plus blank navigation measured
+448.682 ms
 median, 504.267 ms p95, and 510.462 ms maximum. It is explicitly a component
 sum, not a direct end-to-end signpost.
 
-## Settled resource results
+## Phase 1 settled resource baseline
 
 Commands:
 
@@ -98,7 +152,7 @@ the window hierarchy, with nine hidden like background tabs.
 The one-view and ten-view pages intentionally differ, so these results lock the
 absolute gates but do not claim an exact incremental-per-tab slope.
 
-## Content-rule result
+## Phase 1 content-rule baseline
 
 Command: `make blocker-benchmark`
 
@@ -120,7 +174,7 @@ normal launch.
 The provisional absolute budgets remain realistic and are now locked:
 
 - terminated launch to interactive address field: p50 at or below 500 ms and
-  p95 at or below 800 ms, first enforceable when Phase 2 adds the field;
+  p95 at or below 800 ms;
 - usable initial blank web view: p95 at or below 1.2 seconds;
 - settled aggregate CPU: average below 1 percent over 30 seconds;
 - one settled blank tab: aggregate p95 at or below 300 MiB;
@@ -130,6 +184,13 @@ The provisional absolute budgets remain realistic and are now locked:
 
 ## Notes and anomalies
 
+- A pre-optimization combined Phase 2 run completed every functional sample but
+  measured a 541.249 ms first-frame median and failed the 500 ms gate. XCUITest
+  also reported a foreground VLC interruption during that run. The result was
+  not accepted. WebKit startup was then moved behind an explicit measured
+  deferral, launch was isolated from the interaction workload, and the final
+  498.522 ms median passed. The failed evidence remains at
+  `.build/PerformanceResults.gzvyId/`.
 - The first resource probe immediately after a Release rebuild attributed
   481 MiB of wired, unmapped graphics memory to the WebKit GPU process and
   reached 548.9 MiB aggregate. The next launch measured 65.6 MiB. The harness

@@ -1,6 +1,6 @@
 # Browser Implementation Plan
 
-Status: Approved; Phase 1 complete; Phase 2 awaiting review
+Status: Approved; Phases 1 and 2 complete; Phase 3 awaiting checkpoint review
 Last updated: 2026-07-26
 Architecture: [architecture.md](architecture.md)
 
@@ -258,10 +258,10 @@ the real tab implementation introduces.
 
 Phase 1 completed on 2026-07-26. The implementation, API probes, Release
 validation, performance gates, and privileged blank-network audit pass. The
-risk report records an unconditional WKWebView GO. Stop for checkpoint review
-before building the Phase 2 browser shell.
+risk report records an unconditional WKWebView GO. Its checkpoint was approved
+before Phase 2 implementation began.
 
-## 7. Phase 2 — Fast single-page browser
+## 7. Phase 2 — Fast single-page browser (complete)
 
 ### Goal
 
@@ -304,7 +304,11 @@ page.
 
 ### Stopping point
 
-Use and review the single-page browser before adding tabs.
+Phase 2 completed on 2026-07-26. The native single-page browser, functional and
+privacy behavior, Release configuration, launch/command benchmarks, and
+one-page resource gate are recorded in the project status and performance
+baseline. Stop for hands-on review and explicit approval before Phase 3 adds
+tabs.
 
 ## 8. Phase 3 — Tabs and web-view lifecycle
 

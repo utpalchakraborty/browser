@@ -14,11 +14,14 @@ final class BrowserProfile {
     )!
 
     let websiteDataStore: WKWebsiteDataStore
+    let webViewFactory: WebViewFactory
 
     init(dataStoreIdentifier: UUID = normalDataStoreIdentifier) {
-        websiteDataStore = WKWebsiteDataStore(
+        let websiteDataStore = WKWebsiteDataStore(
             forIdentifier: dataStoreIdentifier
         )
+        self.websiteDataStore = websiteDataStore
+        webViewFactory = WebViewFactory(websiteDataStore: websiteDataStore)
     }
 
     static func applicationDataStoreIdentifier(
@@ -28,22 +31,12 @@ final class BrowserProfile {
         if arguments.contains("--performance-test") {
             return performanceDataStoreIdentifier
         }
-#if DEBUG
+        if arguments.contains("--ui-test-profile") {
+            return testHostDataStoreIdentifier
+        }
         if environment["XCTestConfigurationFilePath"] != nil {
             return testHostDataStoreIdentifier
         }
-#endif
         return normalDataStoreIdentifier
-    }
-
-    func makeWebViewConfiguration(
-        contentRuleLists: [WKContentRuleList] = []
-    ) -> WKWebViewConfiguration {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = websiteDataStore
-        for ruleList in contentRuleLists {
-            configuration.userContentController.add(ruleList)
-        }
-        return configuration
     }
 }

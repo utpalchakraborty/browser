@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import Browser
 
@@ -19,6 +20,23 @@ final class BrowserWindowControllerTests: XCTestCase {
             controller.window?.contentView?.accessibilityIdentifier(),
             "BrowserNativeShell"
         )
+        XCTAssertFalse(controller.window?.isRestorable ?? true)
+        XCTAssertEqual(
+            controller.window?.contentMinSize,
+            NSSize(width: 420, height: 300)
+        )
+        XCTAssertNotNil(controller.window?.initialFirstResponder)
+    }
+
+    func testApplicationStateRestorationIsDisabled() {
+        let delegate = AppDelegate()
+
+        XCTAssertFalse(
+            delegate.applicationShouldSaveApplicationState(.shared)
+        )
+        XCTAssertFalse(
+            delegate.applicationShouldRestoreApplicationState(.shared)
+        )
     }
 
     func testHiddenWindowDoesNotConstructWebView() {
@@ -28,6 +46,26 @@ final class BrowserWindowControllerTests: XCTestCase {
         controller.startWebView(profile: profile)
 
         XCTAssertNil(controller.webView)
+    }
+
+    func testRepeatedInitialFocusDoesNotReselectTypedText() throws {
+        let controller = BrowserWindowController()
+        let window = try XCTUnwrap(controller.window)
+        let chromeView = try XCTUnwrap(
+            window.contentView as? BrowserChromeView
+        )
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+
+        controller.ensureInitialAddressFieldFocus()
+        let editor = try XCTUnwrap(chromeView.addressField.currentEditor())
+        editor.string = "focus-probe"
+        editor.selectedRange = NSRange(location: 1, length: 0)
+
+        controller.ensureInitialAddressFieldFocus()
+
+        XCTAssertEqual(editor.string, "focus-probe")
+        XCTAssertEqual(editor.selectedRange, NSRange(location: 1, length: 0))
     }
 
     func testPerformanceViewCountIsBoundedAndRequiresPerformanceMode() {

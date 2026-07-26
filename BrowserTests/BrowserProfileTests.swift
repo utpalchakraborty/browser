@@ -3,21 +3,22 @@ import XCTest
 
 @MainActor
 final class BrowserProfileTests: XCTestCase {
-    func testConfigurationsShareNamedPersistentDataStore() {
+    func testFactoryWebViewsShareNamedPersistentDataStore() {
         let identifier = UUID(
             uuidString: "A1000000-0000-4000-8000-000000000000"
         )!
         let profile = BrowserProfile(dataStoreIdentifier: identifier)
 
-        let firstConfiguration = profile.makeWebViewConfiguration()
-        let secondConfiguration = profile.makeWebViewConfiguration()
+        let firstWebView = profile.webViewFactory.makeWebView()
+        let secondWebView = profile.webViewFactory.makeWebView()
 
         XCTAssertTrue(
-            firstConfiguration.websiteDataStore === secondConfiguration.websiteDataStore
+            firstWebView.configuration.websiteDataStore
+                === secondWebView.configuration.websiteDataStore
         )
-        XCTAssertTrue(firstConfiguration.websiteDataStore.isPersistent)
+        XCTAssertTrue(firstWebView.configuration.websiteDataStore.isPersistent)
         XCTAssertEqual(
-            firstConfiguration.websiteDataStore.identifier,
+            firstWebView.configuration.websiteDataStore.identifier,
             identifier
         )
     }
@@ -25,6 +26,16 @@ final class BrowserProfileTests: XCTestCase {
     func testHostedUnitTestsUseAnIsolatedProfile() {
         let identifier = BrowserProfile.applicationDataStoreIdentifier(
             environment: ["XCTestConfigurationFilePath": "/tmp/test.xctestconfiguration"]
+        )
+
+        XCTAssertEqual(identifier, BrowserProfile.testHostDataStoreIdentifier)
+        XCTAssertNotEqual(identifier, BrowserProfile.normalDataStoreIdentifier)
+    }
+
+    func testUITestLaunchMarkerUsesAnIsolatedProfile() {
+        let identifier = BrowserProfile.applicationDataStoreIdentifier(
+            environment: [:],
+            arguments: ["Browser", "--ui-test-profile"]
         )
 
         XCTAssertEqual(identifier, BrowserProfile.testHostDataStoreIdentifier)

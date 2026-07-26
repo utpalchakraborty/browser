@@ -159,10 +159,7 @@ final class ProfilePersistenceProbe {
         )
         await persistentData.clearAllWebsiteData()
 
-        let persistentWebView = WKWebView(
-            frame: .zero,
-            configuration: persistentProfile.makeWebViewConfiguration()
-        )
+        let persistentWebView = persistentProfile.webViewFactory.makeWebView()
         try await writeFixtureState(in: persistentWebView)
         try await requireFixtureState(
             exists: true,
@@ -208,10 +205,8 @@ final class ProfilePersistenceProbe {
         let persistentData = WebsiteDataController(
             websiteDataStore: persistentProfile.websiteDataStore
         )
-        var persistentWebView: WKWebView? = WKWebView(
-            frame: .zero,
-            configuration: persistentProfile.makeWebViewConfiguration()
-        )
+        var persistentWebView: WKWebView? = persistentProfile.webViewFactory
+            .makeWebView()
         try await loadCookieEcho(in: try unwrap(persistentWebView))
 
         let persistentView = try unwrap(persistentWebView)
@@ -244,10 +239,7 @@ final class ProfilePersistenceProbe {
         ephemeralWebView = nil
         await persistentData.clearAllWebsiteData()
 
-        let reloadedWebView = WKWebView(
-            frame: .zero,
-            configuration: persistentProfile.makeWebViewConfiguration()
-        )
+        let reloadedWebView = persistentProfile.webViewFactory.makeWebView()
         try await loadCookieEcho(in: reloadedWebView)
         try await requireFixtureState(
             exists: false,
@@ -264,10 +256,7 @@ final class ProfilePersistenceProbe {
         let persistentData = WebsiteDataController(
             websiteDataStore: persistentProfile.websiteDataStore
         )
-        let persistentWebView = WKWebView(
-            frame: .zero,
-            configuration: persistentProfile.makeWebViewConfiguration()
-        )
+        let persistentWebView = persistentProfile.webViewFactory.makeWebView()
         try await loadCookieEcho(in: persistentWebView)
         try await requireFixtureState(
             exists: false,
@@ -353,9 +342,7 @@ final class ProfilePersistenceProbe {
     }
 
     private func makeWebView(dataStore: WKWebsiteDataStore) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = dataStore
-        return WKWebView(frame: .zero, configuration: configuration)
+        WebViewFactory(websiteDataStore: dataStore).makeWebView()
     }
 
     private func unwrap<T>(_ value: T?) throws -> T {

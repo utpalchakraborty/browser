@@ -1,0 +1,15 @@
+{
+  "label": "Phase 2",
+  "maximum_unexplained_regression_percent": 10.0,
+  "metrics": {
+    "application_first_frame": {
+      "median_ms": 498.5215620000001,
+      "p95_ms": 565.40175
+    },
+    "initial_webview_readiness_proxy": {
+      "median_ms": 720.6056875000002,
+      "p95_ms": 785.793792
+    }
+  },
+  "source_revision": "phase2-checkpoint-working-tree-2026-07-26"
+}

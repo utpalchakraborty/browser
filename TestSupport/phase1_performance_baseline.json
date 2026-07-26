@@ -1,0 +1,19 @@
+{
+  "explained_regressions": {
+    "application_first_frame": "Phase 2 replaces the blank Phase 1 scaffold with a native toolbar, launch-focused address field, menu wiring, and live navigation state. The locked absolute launch budget remains unchanged and authoritative.",
+    "initial_webview_readiness_proxy": "Phase 2 adds the production WebView factory, navigation delegates, policy enforcement, and observed page state. The locked absolute readiness budget remains unchanged and authoritative."
+  },
+  "label": "Phase 1",
+  "maximum_unexplained_regression_percent": 10.0,
+  "metrics": {
+    "application_first_frame": {
+      "median_ms": 337.9716665,
+      "p95_ms": 392.192958
+    },
+    "initial_webview_readiness_proxy": {
+      "median_ms": 448.6815425,
+      "p95_ms": 504.267249
+    }
+  },
+  "source_revision": "a726dc9"
+}

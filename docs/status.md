@@ -4,70 +4,81 @@ Last updated: 2026-07-26
 
 ## Current phase
 
-Phase 1 — complete. Phase 2 has not started and awaits checkpoint review.
+Phase 2 — complete. Phase 3 has not started and awaits checkpoint review.
 
-Every Phase 1 functional, privacy, Release, and performance gate passes. The
-recorded decision is an unconditional GO for WKWebView on this macOS-only
-architecture.
+The checkpoint is a usable native single-page browser. It accepts HTTP and
+HTTPS URLs, infers HTTPS for plausible hosts, searches plain text, and exposes
+WebKit navigation state through responsive AppKit controls. The Phase 1
+WKWebView GO decision remains unchanged.
 
-## Completed
+## Phase 2 delivered
 
-- Approved macOS-only architecture, personal-use scope, no history, and no
-  telemetry contracts.
-- Native Swift 6 AppKit application with a window-first, deferred-WKWebView
-  lifecycle.
-- arm64 local Release build with App Sandbox, hardened runtime, outgoing
-  network only, no debugger entitlement, and no coverage instrumentation.
-- Deterministic localhost fixture and repeatable functional, performance,
-  resource, profile, blocker, and lifecycle scripts.
-- Explicit named persistent profile isolated from hosted tests and performance
-  measurements.
-- Cookie enumeration plus individual, domain, and cookie-only global deletion.
-- Local storage, IndexedDB, Fetch Cache, and service-worker enumeration and
-  deletion.
-- Real-app persistence probe across three graceful Browser launches, including
-  persistent cookie/localStorage survival, ephemeral isolation, and deletion
-  after a later relaunch.
-- Compiled content-rule caching, blocking, live exception on/off reload,
-  removal, invalid-rule, and cached-attachment validation.
-- Target-blank, `window.open`, download, HTTP Basic authentication,
-  redirect-loop, and web-content-process termination probes.
-- Twenty-launch Release benchmark and locked CPU and memory baselines for one
-  and ten resident views.
-- Privileged production pktap audit with a positive 8-packet attribution
-  control and zero Browser-attributed packets during blank launch plus 31
-  seconds idle.
-- AdGuard Base and Tracking Protection source, converter, license, and manual
-  update policy selected for later production-list work.
+- Native toolbar with a launch-focused address field, Back, Forward,
+  Reload/Stop, progress, page title, and displayed final URL.
+- HTTPS-first address interpretation plus DuckDuckGo, Google, and Bing search
+  selection. Only the selected provider is application-owned persistent state.
+- Sanitized connection, TLS, redirect, timeout, generic navigation, and
+  WebContent-process errors, with retry where recovery is meaningful.
+- HTTP/HTTPS top-level navigation policy, explicit unsupported-scheme blocking,
+  and current-page routing for user-activated new-window links.
+- A central WebView factory, persistent normal WebKit profile, isolated test
+  and performance profiles, disabled scripted popups, and disabled AppKit
+  restoration.
+- Standard Command-L, Command-[, Command-], Command-R, and Command-period
+  navigation shortcuts.
+- No third-party runtime dependencies, telemetry, or application-owned visit
+  history.
 
-Detailed results:
+Detailed design and historical evidence:
 
 - [performance-baseline.md](performance-baseline.md)
 - [phase-1-risk-report.md](phase-1-risk-report.md)
 
-## Verification summary
+## Phase 2 verification summary
 
-- Functional suite: 20 tests, 0 failures.
-- Launch suite: 20 terminated launches, 0 failures; first-frame p95
-  392.193 ms.
-- One blank view: aggregate footprint p95 65.6 MiB; idle CPU mean 0.020%.
-- Ten deterministic views: aggregate footprint p95 280.5 MiB; idle CPU mean
-  0.020%.
-- Cached blocker attachment: p95 0.000125 ms.
-- Production content-process termination: Browser survived; no replacement
-  WebContent process appeared during the five-second observation.
-- Production Release verification: passed after the final source review;
-  arm64, hardened runtime, exactly two sandbox/network entitlements, no coverage
-  symbols, and no DEBUG profile-probe markers.
-- Production blank-network audit: passed; 8 control packets, 0 outbound packets
-  over 31 seconds, and 0 kernel drops. Artifacts:
-  `.build/NetworkAudit.aG4SkM`.
+- Debug functional suite: 54 tests passed (46 unit and 8 UI), 0 failures.
+  Artifact: `.build/TestResults.LmiNhY/Browser.xcresult`.
+- Release unit suite: 46 tests passed, 0 failures. Artifact:
+  `.build/TestResults.iDzvUB/Browser.xcresult`.
+- Release UI suite: 8 tests passed, 0 failures. Artifact:
+  `.build/TestResults.zroTLm/Browser.xcresult`.
+- Release performance suite: 20 focused launches, 20 address submissions/local
+  navigations, and 20 back/forward commands passed. First-frame median was
+  498.522 ms and p95 was 565.402 ms. Initial WebView readiness-proxy p95 was
+  785.794 ms. Artifacts: `.build/PerformanceResults.tfAxfa/`.
+- One-page Release resources: aggregate memory p95 86.5 MiB and idle CPU mean
+  0.013%, both passing. Artifact:
+  `.build/ResourceBaseline.v1.eCb0JI/summary.json`.
+- Production Release verification passed: arm64, hardened runtime, exactly App
+  Sandbox and outgoing-network entitlements, no coverage instrumentation, and
+  no DEBUG profile-probe markers.
+- Production WebContent termination passed: the attributed process exited,
+  Browser survived, and cleanup completed. Artifact:
+  `.build/WebContentTermination.n6I7uO`.
+- The restoration UI test navigated with a unique sentinel and verified a blank
+  relaunch. That sentinel was absent from application preferences, AppKit
+  saved-state data, and Browser unified logs.
 
-The production tab open/close lifecycle does not exist yet, so the
-creation/destruction leak and 100-cycle churn gate is explicitly owned by Phase
-3 rather than measured against disposable Phase 1 scaffolding.
+The Phase 1 privileged pktap audit remains the current blank-network evidence:
+8 positive-control packets and 0 Browser-attributed outbound packets during a
+31-second blank launch/idle window (`.build/NetworkAudit.aG4SkM`). A fresh
+Phase 2 invocation reached the scoped `sudo` password prompt and was stopped;
+rerun `make network-audit` from an interactive Terminal if fresh packet-capture
+evidence is desired.
+
+## Known Phase 2 limitations
+
+There is one page and one window. Tabs, bookmarks, privacy-management UI,
+downloads, production filter lists, and private windows remain later phases.
+Programmatic popups are suppressed; a user-activated new-window link replaces
+the current page until Phase 3 adds tabs.
+
+DNS and TLS presentations have deterministic unit coverage; the end-to-end UI
+retry scenario uses a refused localhost connection. Representative real-site
+compatibility remains part of the hands-on checkpoint rather than a stable
+automated gate.
 
 ## Next action
 
-Review this checkpoint and the risk report. Begin Phase 2 only after explicit
-approval; its first deliverable is the fast single-page browser shell.
+Use the single-page browser with representative sites and review the
+checkpoint. Begin Phase 3 only after explicit approval.

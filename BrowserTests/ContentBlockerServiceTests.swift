@@ -49,9 +49,9 @@ final class ContentBlockerServiceTests: XCTestCase {
         )
         let contentController = WKUserContentController()
         service.replace(nil, with: compiledBlockingRules, on: contentController)
-        let configuration = profile.makeWebViewConfiguration()
-        configuration.userContentController = contentController
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let webView = profile.webViewFactory.makeWebView(
+            userContentController: contentController
+        )
 
         try await WebViewNavigationWaiter().load(
             Phase1Fixture.url("/normal/"),

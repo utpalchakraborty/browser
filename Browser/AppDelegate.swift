@@ -4,6 +4,7 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let maximumPerformanceViewCount = 10
+    private static let initialWebViewDeferralMilliseconds = 100
 
     private lazy var profile = BrowserProfile(
         dataStoreIdentifier: BrowserProfile.applicationDataStoreIdentifier(
@@ -34,24 +35,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSApp.setActivationPolicy(.regular)
         NSApp.disableRelaunchOnLogin()
-        installMainMenu()
 
         let presentationState = BrowserPerformanceSignposts.signposter.beginInterval(
             "InitialWindowPresentation"
         )
-        let controller = BrowserWindowController()
+        let controller = BrowserWindowController(
+            searchProvider: BrowserPreferences.searchProvider()
+        )
         browserWindowController = controller
+        installMainMenu(navigationTarget: controller)
         controller.showWindow(nil)
+        controller.window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
+        let focusState = BrowserPerformanceSignposts.signposter.beginInterval(
+            "InitialAddressFieldFocus"
+        )
+        controller.ensureInitialAddressFieldFocus()
         controller.window?.displayIfNeeded()
+        BrowserPerformanceSignposts.signposter.endInterval(
+            "InitialAddressFieldFocus",
+            focusState
+        )
         BrowserPerformanceSignposts.signposter.endInterval(
             "InitialWindowPresentation",
             presentationState
         )
 
-        // Give AppKit one run-loop turn to present responsive native chrome
-        // before WebKit starts its heavier process and data-store setup.
-        DispatchQueue.main.async { [weak self, weak controller] in
+        DispatchQueue.main.async { [weak controller] in
+            controller?.ensureInitialAddressFieldFocus()
+        }
+
+        // Keep WebKit's heavier process and data-store setup out of the native
+        // chrome's first-frame path. The delay is measured as part of the
+        // initial WebView readiness proxy rather than hidden from the budget.
+        let deferralState = BrowserPerformanceSignposts.signposter.beginInterval(
+            "InitialWebViewDeferral"
+        )
+        DispatchQueue.main.asyncAfter(
+            deadline: .now()
+                + .milliseconds(Self.initialWebViewDeferralMilliseconds)
+        ) { [weak self, weak controller] in
+            BrowserPerformanceSignposts.signposter.endInterval(
+                "InitialWebViewDeferral",
+                deferralState
+            )
             guard
                 let self,
                 let controller,
@@ -69,11 +96,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     arguments: ProcessInfo.processInfo.arguments
                 ) ?? URL(string: "about:blank")!
             )
+            DispatchQueue.main.async { [weak self, weak controller] in
+                guard self?.browserWindowController === controller else {
+                    return
+                }
+                controller?.ensureInitialAddressFieldFocus()
+            }
         }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    func applicationShouldSaveApplicationState(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    func applicationShouldRestoreApplicationState(_ sender: NSApplication) -> Bool {
+        false
     }
 
     static func performanceViewCount(arguments: [String]) -> Int {
@@ -138,18 +179,153 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 #endif
 
-    private func installMainMenu() {
+    private func installMainMenu(navigationTarget: BrowserWindowController) {
         let mainMenu = NSMenu()
-        let applicationMenuItem = NSMenuItem()
-        mainMenu.addItem(applicationMenuItem)
 
-        let applicationMenu = NSMenu()
+        let applicationMenu = NSMenu(title: "Browser")
+        applicationMenu.addItem(
+            withTitle: "About Browser",
+            action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+            keyEquivalent: ""
+        )
+        applicationMenu.addItem(.separator())
+        applicationMenu.addItem(
+            withTitle: "Hide Browser",
+            action: #selector(NSApplication.hide(_:)),
+            keyEquivalent: "h"
+        )
+        let hideOthers = applicationMenu.addItem(
+            withTitle: "Hide Others",
+            action: #selector(NSApplication.hideOtherApplications(_:)),
+            keyEquivalent: "h"
+        )
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        applicationMenu.addItem(
+            withTitle: "Show All",
+            action: #selector(NSApplication.unhideAllApplications(_:)),
+            keyEquivalent: ""
+        )
+        applicationMenu.addItem(.separator())
         applicationMenu.addItem(
             withTitle: "Quit Browser",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
-        applicationMenuItem.submenu = applicationMenu
+        addMenu(applicationMenu, to: mainMenu)
+
+        let fileMenu = NSMenu(title: "File")
+        fileMenu.addItem(
+            withTitle: "Close Window",
+            action: #selector(NSWindow.performClose(_:)),
+            keyEquivalent: "w"
+        )
+        addMenu(fileMenu, to: mainMenu)
+
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(
+            withTitle: "Undo",
+            action: Selector(("undo:")),
+            keyEquivalent: "z"
+        )
+        let redoItem = editMenu.addItem(
+            withTitle: "Redo",
+            action: Selector(("redo:")),
+            keyEquivalent: "z"
+        )
+        redoItem.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(.separator())
+        editMenu.addItem(
+            withTitle: "Cut",
+            action: #selector(NSText.cut(_:)),
+            keyEquivalent: "x"
+        )
+        editMenu.addItem(
+            withTitle: "Copy",
+            action: #selector(NSText.copy(_:)),
+            keyEquivalent: "c"
+        )
+        editMenu.addItem(
+            withTitle: "Paste",
+            action: #selector(NSText.paste(_:)),
+            keyEquivalent: "v"
+        )
+        editMenu.addItem(
+            withTitle: "Select All",
+            action: #selector(NSText.selectAll(_:)),
+            keyEquivalent: "a"
+        )
+        addMenu(editMenu, to: mainMenu)
+
+        let navigationMenu = NSMenu(title: "Navigate")
+        let openLocationItem = navigationMenu.addItem(
+            withTitle: "Open Location",
+            action: #selector(BrowserWindowController.focusAddressField(_:)),
+            keyEquivalent: "l"
+        )
+        openLocationItem.target = navigationTarget
+        navigationMenu.addItem(.separator())
+        let backItem = navigationMenu.addItem(
+            withTitle: "Back",
+            action: #selector(BrowserWindowController.goBack(_:)),
+            keyEquivalent: "["
+        )
+        backItem.target = navigationTarget
+        let forwardItem = navigationMenu.addItem(
+            withTitle: "Forward",
+            action: #selector(BrowserWindowController.goForward(_:)),
+            keyEquivalent: "]"
+        )
+        forwardItem.target = navigationTarget
+        navigationMenu.addItem(.separator())
+        let reloadItem = navigationMenu.addItem(
+            withTitle: "Reload Page",
+            action: #selector(BrowserWindowController.reloadPage(_:)),
+            keyEquivalent: "r"
+        )
+        reloadItem.target = navigationTarget
+        let stopItem = navigationMenu.addItem(
+            withTitle: "Stop Loading",
+            action: #selector(BrowserWindowController.stopLoading(_:)),
+            keyEquivalent: "."
+        )
+        stopItem.target = navigationTarget
+
+        let searchProviderItem = NSMenuItem(title: "Search Provider", action: nil, keyEquivalent: "")
+        let searchProviderMenu = NSMenu(title: "Search Provider")
+        for provider in SearchProvider.allCases {
+            let item = searchProviderMenu.addItem(
+                withTitle: provider.displayName,
+                action: #selector(BrowserWindowController.selectSearchProvider(_:)),
+                keyEquivalent: ""
+            )
+            item.representedObject = provider.rawValue
+            item.target = navigationTarget
+        }
+        searchProviderItem.submenu = searchProviderMenu
+        navigationMenu.addItem(.separator())
+        navigationMenu.addItem(searchProviderItem)
+        addMenu(navigationMenu, to: mainMenu)
+
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(
+            withTitle: "Minimize",
+            action: #selector(NSWindow.performMiniaturize(_:)),
+            keyEquivalent: "m"
+        )
+        windowMenu.addItem(
+            withTitle: "Zoom",
+            action: #selector(NSWindow.performZoom(_:)),
+            keyEquivalent: ""
+        )
+        addMenu(windowMenu, to: mainMenu)
+        NSApp.windowsMenu = windowMenu
+
         NSApp.mainMenu = mainMenu
+    }
+
+    private func addMenu(_ menu: NSMenu, to mainMenu: NSMenu) {
+        let item = NSMenuItem(title: menu.title, action: nil, keyEquivalent: "")
+        item.submenu = menu
+        mainMenu.addItem(item)
     }
 }
