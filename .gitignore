@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+
+# Xcode per-user state
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+
+# Build products
+build/
+DerivedData/
+*.dSYM
+*.dSYM.zip
+*.xcarchive
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Test and profiling output
+*.xcresult
+*.trace
