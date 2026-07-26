@@ -16,11 +16,17 @@ Last updated: 2026-07-26
 | Architecture | arm64 |
 | Build configuration | Release, no debugger, sanitizers, or code coverage |
 | Runtime dependencies | Apple system frameworks only |
-| Measured source state | `b493f16` plus the Phase 1 worktree; checkpoint revision pending the final network audit |
+| Measured source state | Phase 1 checkpoint `a726dc9`; see the collection note below |
 
 The measurements were collected from the Phase 1 checkpoint on a normally
 loaded desktop. Raw results stay in ignored `.build` directories and are never
 uploaded.
+
+The launch and resource runs predate final test/audit-harness hardening in
+`a726dc9`; that hardening did not change the Release launch path in
+`AppDelegate` or `BrowserWindowController`. The production Release bundle was
+rebuilt and verified after those changes, and each result section records its
+exact raw artifact path.
 
 ## Protocol
 
