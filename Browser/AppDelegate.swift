@@ -1,5 +1,10 @@
 import AppKit
 
+nonisolated struct BookmarkLaunchConfiguration: Equatable, Sendable {
+    let directoryURL: URL
+    let resetOnLaunch: Bool
+}
+
 @main
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -68,6 +73,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller?.ensureInitialAddressFieldFocus()
         }
 
+        DispatchQueue.main.async { [weak controller] in
+            guard
+                let controller,
+                let applicationSupportDirectory = FileManager.default.urls(
+                    for: .applicationSupportDirectory,
+                    in: .userDomainMask
+                ).first,
+                let configuration = Self.bookmarkLaunchConfiguration(
+                    arguments: CommandLine.arguments,
+                    applicationSupportDirectory: applicationSupportDirectory
+                )
+            else {
+                return
+            }
+            controller.startBookmarks(
+                repository: BookmarkRepository(
+                    directoryURL: configuration.directoryURL
+                ),
+                resetOnLaunch: configuration.resetOnLaunch
+            )
+        }
+
         // Keep WebKit's heavier process and data-store setup out of the native
         // chrome's first-frame path. The delay is measured as part of the
         // initial WebView readiness proxy rather than hidden from the budget.
@@ -132,6 +159,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return nil
         }
         return BrowserWindowController.mainWindowFrameAutosaveName
+    }
+
+    static func bookmarkLaunchConfiguration(
+        arguments: [String],
+        applicationSupportDirectory: URL
+    ) -> BookmarkLaunchConfiguration? {
+        if arguments.contains("--performance-test") {
+            return nil
+        }
+
+        let rootDirectory = applicationSupportDirectory.appendingPathComponent(
+            "com.utpalchakraborty.browser",
+            isDirectory: true
+        )
+        let isUITest = arguments.contains("--ui-test-profile")
+        let directoryURL = isUITest
+            ? rootDirectory.appendingPathComponent("UITests", isDirectory: true)
+            : rootDirectory
+        return BookmarkLaunchConfiguration(
+            directoryURL: directoryURL,
+            resetOnLaunch: isUITest
+                && arguments.contains("--reset-ui-test-bookmarks")
+        )
     }
 
     static func performanceViewCount(arguments: [String]) -> Int {
@@ -322,6 +372,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         navigationMenu.addItem(.separator())
         navigationMenu.addItem(searchProviderItem)
         addMenu(navigationMenu, to: mainMenu)
+
+        let bookmarksMenu = NSMenu(title: "Bookmarks")
+        let addBookmarkItem = bookmarksMenu.addItem(
+            withTitle: "Add Bookmark…",
+            action: #selector(BrowserWindowController.bookmarkCurrentPage(_:)),
+            keyEquivalent: "d"
+        )
+        addBookmarkItem.target = navigationTarget
+        let showBookmarksItem = bookmarksMenu.addItem(
+            withTitle: "Show Bookmarks",
+            action: #selector(BrowserWindowController.showBookmarks(_:)),
+            keyEquivalent: "b"
+        )
+        showBookmarksItem.keyEquivalentModifierMask = [.command, .option]
+        showBookmarksItem.target = navigationTarget
+        addMenu(bookmarksMenu, to: mainMenu)
 
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(

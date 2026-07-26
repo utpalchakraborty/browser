@@ -1,6 +1,7 @@
 # Browser Architecture
 
-Status: Approved for macOS implementation
+Status: Approved; current implementation through Phase 3, tabs planned for
+Phase 4
 Last updated: 2026-07-26
 
 ## 1. Purpose
@@ -96,22 +97,22 @@ vertical slice.
 
 ~~~mermaid
 flowchart TD
-    App[Browser application] --> Window[BrowserWindowController]
-    Window --> Tabs[TabManager]
-    Tabs --> Tab[TabController per resident tab]
-    Tab --> Web[WKWebView]
-
+    App[AppDelegate] --> Window[BrowserWindowController]
     App --> Profile[BrowserProfile]
     Profile --> Factory[WebViewFactory]
-    Profile --> Data[WebsiteDataController]
-    Profile --> Blocking[ContentBlockerService]
-    Profile --> Bookmarks[BookmarkRepository]
-    Profile --> Policies[SitePolicyStore]
-
-    Factory --> Web
+    Factory --> Web[WKWebView]
     Factory --> Store[WKWebsiteDataStore]
-    Blocking --> Rules[WKContentRuleListStore]
-    Data --> Store
+    Window --> Web
+
+    App --> Repository[BookmarkRepository actor]
+    Window --> Coordinator[BookmarkCoordinator]
+    Window --> BookmarkUI[Bookmark editor and manager]
+    BookmarkUI --> Coordinator
+    Coordinator --> Repository
+    Repository --> Files[Versioned JSON and backup]
+
+    Window -. Phase 4 .-> Tabs[TabManager]
+    Tabs -. Phase 4 .-> Tab[TabController per resident tab]
 ~~~
 
 The important boundary is between browser-owned behavior and WebKit-owned
@@ -130,32 +131,35 @@ behavior:
 ### Application layer
 
 AppDelegate owns process lifecycle, creates windows, installs application menus,
-and disables AppKit state restoration so macOS cannot reconstruct browser
-windows, web content, or tab URLs.
+disables AppKit state restoration so macOS cannot reconstruct browser windows,
+web content, or tab URLs, and creates the production BookmarkRepository after
+the native window has been presented.
 
 BrowserWindowController owns one browser window, including:
 
-- the tab strip;
 - address field and navigation buttons;
-- selected page container;
+- the current single-page WKWebView container;
 - keyboard focus and command routing;
 - configuration of native frame autosave for the main window; and
-- presentation of bookmark and privacy management windows.
+- bookmark-button state and presentation of the bookmark editor and manager.
 
-There is no global navigation singleton. Commands are routed to the selected tab
-in the key browser window.
+There is no global navigation singleton. Phase 3 routes commands to the current
+page in the key browser window; Phase 4 will route the same semantic commands
+to the selected tab.
 
 ### Profile layer
 
-BrowserProfile is the single composition root for profile-scoped services:
+BrowserProfile is the composition root for WebKit profile-scoped services:
 
 - a stable persistent WKWebsiteDataStore;
 - WebViewFactory;
-- WebsiteDataController;
-- ContentBlockerService;
-- BookmarkRepository;
-- SitePolicyStore; and
-- preferences.
+- future WebsiteDataController and ContentBlockerService instances; and
+- future site-policy state.
+
+Bookmarks are application-owned data rather than WebKit profile data.
+AppDelegate constructs BookmarkRepository separately and injects it into the
+window controller, which exposes only immutable snapshots through a main-actor
+BookmarkCoordinator.
 
 The normal profile is intentionally persistent because the user wants cookies
 that survive relaunch and can be inspected. A future private window would use a
@@ -164,7 +168,8 @@ normal profile.
 
 ### Tab layer
 
-TabManager owns the ordered tab collection, selected tab identifier, creation,
+Phase 4 introduces this layer. TabManager will own the ordered tab collection,
+selected tab identifier, creation,
 closure, reordering, and routing of popup/new-window requests.
 
 TabController is main-actor isolated and owns:
@@ -224,15 +229,33 @@ Phase 2 default is DuckDuckGo without live suggestions.
 
 ### Bookmarks
 
-BookmarkRepository is a Swift actor that owns a versioned file containing
-stable identifiers, URL, title, and creation/update timestamps.
+BookmarkRepository is a Swift actor that owns `Bookmarks.json`, a versioned
+file containing stable identifiers, canonical HTTP/HTTPS URLs, titles, and
+creation/update timestamps.
 
 - Reads and writes do not run on the main actor.
 - Writes use atomic replacement.
-- A last-known-good backup is retained before a schema migration.
-- Decoding or migration failure produces a visible recovery path rather than
-  silently replacing the file.
-- UI receives immutable bookmark snapshots on the main actor.
+- Every successful mutation writes the latest validated snapshot to both
+  `Bookmarks.backup.json` and the primary. This keeps recovery current and
+  ensures an edited or deleted URL does not remain in the active backup.
+- A malformed primary is copied to a uniquely named `Bookmarks.corrupt.*.json`
+  file. A valid backup is shown read-only until the user explicitly restores it
+  or resets the library; unrecoverable data remains a visible error.
+- BookmarkCoordinator supplies immutable snapshots to the main-actor browser
+  toolbar, editor sheet, and searchable nonmodal manager.
+- The toolbar star and Command-D add or edit the current page;
+  Option-Command-B opens the manager. Opening a bookmark replaces the current
+  page until Phase 4 routes it to the selected tab.
+
+Phase 3 deliberately has no persistent bookmarks bar and no folder hierarchy.
+The searchable manager and keyboard commands keep the browsing surface compact;
+folders can be added later without changing the repository boundary if a real
+flat-library organization problem emerges.
+
+Production files live in the sandbox's Application Support directory under
+`com.utpalchakraborty.browser`. UI tests use an isolated `UITests` subdirectory.
+Performance launches construct no repository and therefore touch no bookmark
+store.
 
 Bookmarks are deliberately saved URLs and therefore are not browsing history.
 
@@ -297,7 +320,7 @@ request.
 
 | Data | Owner | Purpose | User deletion |
 | --- | --- | --- | --- |
-| Bookmarks | BookmarkRepository | Explicitly saved pages | Delete individually or reset bookmarks |
+| Bookmarks | BookmarkRepository | Explicitly saved pages | Delete individually; reset active files; remove active and preserved corrupt files while Browser is quit for complete erasure |
 | Required preferences | UserDefaults | Search provider and blocker enabled state | Reset settings |
 | Main window frame | UserDefaults through AppKit frame autosave | Reopen at the last usable size and location | Reset settings |
 | Per-site blocker exceptions | SitePolicyStore | Explicit user choices | Remove individually or reset exceptions |
@@ -384,7 +407,9 @@ CNAME cloaking, or a newly introduced tracker.
 ### Rules
 
 - Show the window and focus the address field before loading optional
-  bookmarks, cookie snapshots, or blocker metadata.
+  bookmarks, cookie snapshots, or blocker metadata. Bookmark startup is queued
+  after native-window presentation and disabled entirely for performance-test
+  launches.
 - Do not synchronously read files or perform application-owned network work on
   the main actor. Prepare blocker JSON away from the main actor and call
   WebKit's asynchronous compilation API without delaying interactive chrome.
@@ -439,7 +464,7 @@ Navigation completion is never treated as a signal to persist a visit.
 - A failed page load shows the failing host and useful error without logging the
   full URL.
 - A corrupt bookmark file preserves the bad input for manual recovery and
-  offers the last valid backup.
+  offers the last valid backup read-only until explicit restore or reset.
 - A failed blocker update leaves the last compiled list active.
 - A failed cookie/site-data deletion remains visible and refreshes from WebKit
   before reporting success.
@@ -501,6 +526,8 @@ pages for:
 - content-rule request blocking and exceptions;
 - downloads and authentication;
 - relaunch with restored window geometry but no restored browsing state;
+- bookmark add, edit, title/URL search, open-in-current-page, delete, and
+  relaunch persistence;
 - tab switching without reload; and
 - web-content process recovery where automation permits.
 

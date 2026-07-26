@@ -4,15 +4,85 @@ Last updated: 2026-07-26
 
 ## Current phase
 
-Phase 2 — complete and checkpoint approved. A narrow Phase 2 quality-of-life
-follow-up for window geometry is implemented with functional verification
-passed; hands-on review and a clean performance rerun remain pending. Phase 3
-bookmarks and owned persistence have not started; tabs now follow in Phase 4.
+Phase 3 — bookmarks are implemented and the Debug and Release functional
+suites pass. The user approved the normal live bookmark workflow; the manual
+recovery exercise and a clean idle-desktop launch-performance rerun remain
+pending, so the complete Phase 3 gate is not yet closed. Tabs remain Phase 4
+work.
 
-The checkpoint is a usable native single-page browser. It accepts HTTP and
-HTTPS URLs, infers HTTPS for plausible hosts, searches plain text, and exposes
-WebKit navigation state through responsive AppKit controls. The Phase 1
-WKWebView GO decision remains unchanged.
+The browser is now a usable native single-page pilot. It accepts HTTP and HTTPS
+URLs, infers HTTPS for plausible hosts, searches plain text, exposes WebKit
+navigation state through responsive AppKit controls, and persists only pages
+the user explicitly bookmarks. The Phase 1 WKWebView GO decision remains
+unchanged.
+
+## Phase 3 implemented
+
+- A toolbar star and Command-D add the current page or edit its existing
+  bookmark. Option-Command-B opens a nonmodal, searchable Bookmarks manager.
+- Add, edit, delete, title/URL search, duplicate handling, relaunch persistence,
+  and open-in-current-page workflows are implemented. Tabs remain deliberately
+  absent until Phase 4.
+- The bookmark library is intentionally a flat, keyboard-first searchable
+  manager with no persistent bookmarks bar. The user approved this cleaner
+  workflow; folder hierarchy is deferred until real use demonstrates a need.
+- Versioned bookmark models are independent of AppKit and WebKit. An
+  actor-isolated repository performs atomic JSON writes outside the main actor
+  and retains a last-valid backup.
+- Production data lives under the app's Application Support container as
+  `Bookmarks.json` and `Bookmarks.backup.json`. UI tests use an isolated
+  `UITests` directory and can reset it explicitly.
+- Corrupt primary data is preserved, a valid backup is presented read-only,
+  and the manager offers explicit restore or reset actions. Invalid or
+  unsupported files are not silently replaced.
+- Normal bookmark startup is queued after the initial native window is shown.
+  Performance-test launches do not create or touch a bookmark repository.
+- The no-history and no-telemetry invariants are unchanged: only explicitly
+  saved bookmark URLs enter application-owned persistence.
+
+Debug automated verification is green: 70 of 70 unit tests passed and 9 of 9
+UI tests passed. The UI suite covers add, edit, title/URL search, relaunch,
+keyboard-driven open/edit/delete, and confirmed deletion. The storage suite
+also verifies that edited and deleted URLs disappear from both active JSON
+copies. Artifacts: `.build/TestResults.SgT7hl/Browser.xcresult` and
+`.build/TestResults.I0omV2/Browser.xcresult`.
+
+Release automated verification is also green: 70 of 70 unit tests and 9 of 9
+UI tests passed. The production bundle passed arm64, sandbox-entitlement,
+hardened-runtime, and signature inspection. Artifacts:
+`.build/TestResults.1ViJIr/Browser.xcresult`,
+`.build/TestResults.LvYCDE/Browser.xcresult`, and
+`.build/DerivedData/Build/Products/Release/Browser.app`.
+
+The Release 10,000-bookmark gate is green: load p95 is 63.164 ms against a
+100 ms limit, repository search p95 is 18.725 ms, and the exact manager filter
+path is 18.536 ms against 50 ms limits. The generated 2,398,938-byte fixture
+lives only in a temporary benchmark directory and contains no user data.
+
+The full Release performance run completed all 20 launch, 20 address/local
+navigation, and 20 back/forward samples. Bookmark and interaction gates passed:
+address submission p95 was 0.758 ms, browser-command p95 was 0.187 ms, and
+local navigation p95 was 24.206 ms. The launch gate did not pass: first-frame
+median was 573.542 ms against 500 ms, although p95 was 624.031 ms against
+800 ms; Phase 2-relative first-frame and readiness comparisons exceeded their
+10% budgets. Performance-test launches do not initialize bookmarks, which
+isolates bookmark-store I/O but does not by itself explain the launch result.
+A confirmation attempt was invalidated by foreground Ghostty-window
+interference and stopped. A clean idle-desktop rerun is required. Artifacts:
+`.build/PerformanceResults.QvWEvu/`.
+
+A fresh container inspection after automated navigation found no Browser-owned
+history, visit, session, or navigation database. The app-owned Application
+Support namespace contained only the empty isolated `UITests` directory; the
+normal and test WebKit `SearchHistory` directories were also empty. Other
+database-like files were confined to WebKit's website-data store and represent
+WebKit-managed site data, caches, and privacy infrastructure rather than
+application-owned visit history.
+
+The user approved the production add/edit/search/open/delete, keyboard-command,
+and relaunch-persistence workflow on 2026-07-26. One manual
+backup/recovery/reset scenario and a clean launch-performance rerun remain
+pending.
 
 ## Phase 2 delivered
 
@@ -32,7 +102,7 @@ WKWebView GO decision remains unchanged.
 - No third-party runtime dependencies, telemetry, or application-owned visit
   history.
 
-## Implemented Phase 2 QoL follow-up
+## Approved Phase 2 QoL follow-up
 
 The implementation remembers only the main browser window's last usable size
 and location through AppKit's native frame autosave. AppKit applies the saved
@@ -40,6 +110,8 @@ frame for the current display environment, while the browser keeps its centered
 default when there is no usable saved frame. AppKit state restoration stays
 disabled, and relaunch must remain blank with the address field focused; no URL,
 page, back/forward, or future tab state may be restored.
+
+The user manually approved this behavior, and it was committed as `aa8ee6a`.
 
 The Debug unit suite passed 48 tests, including isolated native-frame save and
 restore plus launch-mode coverage. The Debug UI suite passed all 8 tests,
@@ -93,11 +165,11 @@ Phase 2 invocation reached the scoped `sudo` password prompt and was stopped;
 rerun `make network-audit` from an interactive Terminal if fresh packet-capture
 evidence is desired.
 
-## Known Phase 2 limitations
+## Current limitations
 
-There is one page and one window. Bookmarks remain Phase 3 work; tabs,
-privacy-management UI, downloads, production filter lists, and private windows
-remain later phases.
+There is one page and one window. Opening a bookmark replaces the current page.
+Tabs, privacy-management UI, downloads, production filter lists, and private
+windows remain later phases.
 Programmatic popups are suppressed; a user-activated new-window link replaces
 the current page until Phase 4 adds tabs.
 
@@ -108,8 +180,8 @@ automated gate.
 
 ## Next action
 
-Move and resize the browser, quit, and relaunch to verify the production window
-returns to the expected frame while the page remains blank. Rerun
-`make performance` on an idle desktop to clear the first-frame absolute gate.
-Review that narrow checkpoint, then begin Phase 3 bookmarks. Tabs wait for
-Phase 4.
+Back up the bookmark files, force one recovery, and test Restore Backup or
+Reset Bookmarks. Then rerun the launch-performance gate on an idle desktop and
+review the Phase 3 checkpoint before starting Phase 4 tabs. Revisit bookmark
+folders only if ordinary use shows that the flat searchable manager is
+insufficient.

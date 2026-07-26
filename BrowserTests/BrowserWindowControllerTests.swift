@@ -23,7 +23,7 @@ final class BrowserWindowControllerTests: XCTestCase {
         XCTAssertFalse(controller.window?.isRestorable ?? true)
         XCTAssertEqual(
             controller.window?.contentMinSize,
-            NSSize(width: 420, height: 300)
+            NSSize(width: 460, height: 300)
         )
         XCTAssertNotNil(controller.window?.initialFirstResponder)
     }

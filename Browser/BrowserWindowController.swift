@@ -31,6 +31,9 @@ final class BrowserWindowController: NSWindowController,
     private var addressInterpreter: AddressInterpreter
     private var searchProvider: SearchProvider
     private var observations: [NSKeyValueObservation] = []
+    private var bookmarkCoordinator: BookmarkCoordinator?
+    private var bookmarkManagerWindowController: BookmarkManagerWindowController?
+    private var bookmarkEditorSheetController: BookmarkEditorSheetController?
 
     private var observedURL: URL?
     private var observedTitle: String?
@@ -65,7 +68,7 @@ final class BrowserWindowController: NSWindowController,
         window.center()
         window.isReleasedWhenClosed = false
         window.isRestorable = false
-        window.contentMinSize = NSSize(width: 420, height: 300)
+        window.contentMinSize = NSSize(width: 460, height: 300)
         window.backgroundColor = .windowBackgroundColor
         Self.setAccessibilityIdentifier("BrowserMainWindow", on: window)
         window.contentView = chromeView
@@ -89,6 +92,8 @@ final class BrowserWindowController: NSWindowController,
         chromeView.forwardButton.action = #selector(goForward(_:))
         chromeView.reloadStopButton.target = self
         chromeView.reloadStopButton.action = #selector(reloadOrStop(_:))
+        chromeView.bookmarkButton.target = self
+        chromeView.bookmarkButton.action = #selector(bookmarkCurrentPage(_:))
         chromeView.errorView.retryButton.target = self
         chromeView.errorView.retryButton.action = #selector(retryNavigation(_:))
         window.initialFirstResponder = chromeView.addressField
@@ -147,6 +152,40 @@ final class BrowserWindowController: NSWindowController,
             webViews.append(backgroundWebView)
             backgroundWebView.load(URLRequest(url: initialURL))
         }
+    }
+
+    func startBookmarks(
+        repository: BookmarkRepository,
+        resetOnLaunch: Bool = false
+    ) {
+        guard bookmarkCoordinator == nil else {
+            return
+        }
+
+        let coordinator = BookmarkCoordinator(repository: repository)
+        coordinator.onStateChange = { [weak self] state in
+            self?.bookmarkStateDidChange(state)
+        }
+        bookmarkCoordinator = coordinator
+        renderBookmarkState()
+        coordinator.start(resetOnLaunch: resetOnLaunch)
+    }
+
+    var currentBookmarkPageCandidate: BookmarkPageCandidate? {
+        BookmarkPageCandidate.currentPage(
+            url: observedURL,
+            title: observedTitle,
+            isLoading: observedIsLoading,
+            hasVisibleError: !chromeView.errorView.isHidden
+        )
+    }
+
+    func openBookmark(_ url: URL) {
+        guard let canonicalURL = try? Bookmark.canonicalURL(for: url) else {
+            NSSound.beep()
+            return
+        }
+        navigate(to: canonicalURL)
     }
 
     @objc
@@ -262,6 +301,34 @@ final class BrowserWindowController: NSWindowController,
     }
 
     @objc
+    func bookmarkCurrentPage(_ sender: Any?) {
+        guard
+            let coordinator = bookmarkCoordinator,
+            coordinator.allowsChanges,
+            let candidate = currentBookmarkPageCandidate
+        else {
+            NSSound.beep()
+            return
+        }
+
+        if let existing = bookmarkedCurrentPage {
+            presentBookmarkEditor(editing: existing)
+        } else {
+            presentBookmarkEditor(adding: candidate)
+        }
+    }
+
+    @objc
+    func showBookmarks(_ sender: Any?) {
+        guard bookmarkCoordinator != nil else {
+            return
+        }
+        let manager = bookmarkManager()
+        renderBookmarkManager()
+        manager.showWindow(sender)
+    }
+
+    @objc
     func selectSearchProvider(_ sender: NSMenuItem) {
         guard
             let rawValue = sender.representedObject as? String,
@@ -289,6 +356,14 @@ final class BrowserWindowController: NSWindowController,
             return webView != nil && webView?.isLoading == false
         case #selector(stopLoading(_:)):
             return webView?.isLoading == true
+        case #selector(bookmarkCurrentPage(_:)):
+            menuItem.title = bookmarkedCurrentPage == nil
+                ? "Add Bookmark…"
+                : "Edit Bookmark…"
+            return bookmarkCoordinator?.allowsChanges == true
+                && currentBookmarkPageCandidate != nil
+        case #selector(showBookmarks(_:)):
+            return bookmarkCoordinator != nil
         case #selector(selectSearchProvider(_:)):
             menuItem.state = (menuItem.representedObject as? String)
                 == searchProvider.rawValue ? .on : .off
@@ -325,6 +400,14 @@ final class BrowserWindowController: NSWindowController,
     func windowWillClose(_ notification: Notification) {
         finishFirstBlankNavigation(accessibilityValue: "Cancelled")
         finishSubmittedNavigation(accessibilityValue: "Cancelled")
+        bookmarkCoordinator?.cancel()
+        bookmarkManagerWindowController?.close()
+        if
+            let editorWindow = bookmarkEditorSheetController?.window,
+            let parentWindow = editorWindow.sheetParent
+        {
+            parentWindow.endSheet(editorWindow)
+        }
         observations.forEach { $0.invalidate() }
         observations.removeAll()
         webView?.navigationDelegate = nil
@@ -505,6 +588,7 @@ final class BrowserWindowController: NSWindowController,
                 Task { @MainActor [weak self, weak observed] in
                     self?.observedURL = observed?.url
                     self?.renderDisplayedURL()
+                    self?.renderBookmarkState()
                 }
             },
             webView.observe(\.title, options: [.initial, .new]) {
@@ -512,6 +596,7 @@ final class BrowserWindowController: NSWindowController,
                 Task { @MainActor [weak self, weak observed] in
                     self?.observedTitle = observed?.title
                     self?.renderWindowTitle()
+                    self?.renderBookmarkState()
                 }
             },
             webView.observe(\.estimatedProgress, options: [.initial, .new]) {
@@ -526,6 +611,7 @@ final class BrowserWindowController: NSWindowController,
                 Task { @MainActor [weak self, weak observed] in
                     self?.observedIsLoading = observed?.isLoading ?? false
                     self?.renderLoadingState()
+                    self?.renderBookmarkState()
                 }
             },
             webView.observe(\.canGoBack, options: [.initial, .new]) {
@@ -626,6 +712,191 @@ final class BrowserWindowController: NSWindowController,
         renderProgress()
         renderLoadingState()
         renderNavigationState()
+        renderBookmarkState()
+    }
+
+    private var bookmarkedCurrentPage: Bookmark? {
+        guard let candidate = currentBookmarkPageCandidate else {
+            return nil
+        }
+        return bookmarkCoordinator?.bookmarks.first {
+            $0.url == candidate.url
+        }
+    }
+
+    private func bookmarkStateDidChange(_ state: BookmarkCoordinator.State) {
+        renderBookmarkState()
+        renderBookmarkManager()
+    }
+
+    private func renderBookmarkState() {
+        chromeView.updateBookmarkButton(
+            isBookmarked: bookmarkedCurrentPage != nil,
+            isEnabled: bookmarkCoordinator?.allowsChanges == true
+                && currentBookmarkPageCandidate != nil
+        )
+        bookmarkManagerWindowController?.refreshCurrentPageAvailability()
+    }
+
+    private func bookmarkManager() -> BookmarkManagerWindowController {
+        if let bookmarkManagerWindowController {
+            return bookmarkManagerWindowController
+        }
+
+        let manager = BookmarkManagerWindowController()
+        manager.currentPageProvider = { [weak self] in
+            self?.currentBookmarkPageCandidate
+        }
+        manager.onAddCurrentPage = { [weak self] candidate in
+            guard let self else {
+                return
+            }
+            if let existing = bookmarkedCurrentPage {
+                presentBookmarkEditor(editing: existing)
+            } else {
+                presentBookmarkEditor(adding: candidate)
+            }
+        }
+        manager.onEdit = { [weak self] bookmark in
+            self?.presentBookmarkEditor(editing: bookmark)
+        }
+        manager.onDelete = { [weak self, weak manager] bookmark in
+            manager?.showOperationStatus("Deleting bookmark…")
+            self?.bookmarkCoordinator?.delete(id: bookmark.id) { errorMessage in
+                if let errorMessage {
+                    manager?.showOperationStatus(errorMessage)
+                }
+            }
+        }
+        manager.onOpen = { [weak self] bookmark in
+            self?.openBookmark(bookmark.url)
+            self?.window?.makeKeyAndOrderFront(nil)
+        }
+        manager.onRestoreBackup = { [weak self, weak manager] in
+            manager?.showOperationStatus("Restoring bookmark backup…")
+            self?.bookmarkCoordinator?.restoreBackup { errorMessage in
+                if let errorMessage {
+                    manager?.showOperationStatus(errorMessage)
+                }
+            }
+        }
+        manager.onReset = { [weak self, weak manager] in
+            manager?.showOperationStatus("Resetting bookmarks…")
+            self?.bookmarkCoordinator?.reset { errorMessage in
+                if let errorMessage {
+                    manager?.showOperationStatus(errorMessage)
+                }
+            }
+        }
+        bookmarkManagerWindowController = manager
+        return manager
+    }
+
+    private func renderBookmarkManager() {
+        guard let manager = bookmarkManagerWindowController else {
+            return
+        }
+        guard let coordinator = bookmarkCoordinator else {
+            manager.showFailure("Bookmarks are unavailable in this launch mode.", canReset: false)
+            return
+        }
+
+        switch coordinator.state {
+        case .idle, .loading:
+            manager.showLoading()
+        case let .ready(snapshot):
+            let recoveryMessage: String?
+            switch snapshot.recovery?.reason {
+            case .corruptPrimary:
+                recoveryMessage = "A damaged bookmark file was preserved. You can open this read-only backup, then restore it or reset the library."
+            case .missingPrimary:
+                recoveryMessage = "The primary bookmark file is missing. You can open this read-only backup, then restore it or reset the library."
+            case nil:
+                recoveryMessage = nil
+            }
+            manager.update(
+                bookmarks: snapshot.bookmarks,
+                allowsChanges: coordinator.allowsChanges,
+                recoveryMessage: recoveryMessage,
+                canRestoreBackup: coordinator.allowsRecoveryActions,
+                canReset: snapshot.recovery != nil
+                    && !coordinator.operationInProgress
+            )
+        case let .failed(message):
+            manager.showFailure(
+                message,
+                canReset: !coordinator.operationInProgress
+            )
+        }
+    }
+
+    private func presentBookmarkEditor(adding candidate: BookmarkPageCandidate) {
+        let editor = bookmarkEditor()
+        guard !editor.activateIfPresented() else {
+            NSSound.beep()
+            return
+        }
+        guard let parentWindow = bookmarkEditorParentWindow else {
+            return
+        }
+        editor.beginAdding(candidate, for: parentWindow)
+    }
+
+    private func presentBookmarkEditor(editing bookmark: Bookmark) {
+        let editor = bookmarkEditor()
+        guard !editor.activateIfPresented() else {
+            NSSound.beep()
+            return
+        }
+        guard let parentWindow = bookmarkEditorParentWindow else {
+            return
+        }
+        editor.beginEditing(bookmark, for: parentWindow)
+    }
+
+    private var bookmarkEditorParentWindow: NSWindow? {
+        if bookmarkManagerWindowController?.window?.isKeyWindow == true {
+            return bookmarkManagerWindowController?.window
+        }
+        return window
+    }
+
+    private func bookmarkEditor() -> BookmarkEditorSheetController {
+        if let bookmarkEditorSheetController {
+            return bookmarkEditorSheetController
+        }
+
+        let editor = BookmarkEditorSheetController()
+        editor.onSave = { [weak self, weak editor] identifier, url, title in
+            guard let coordinator = self?.bookmarkCoordinator else {
+                editor?.completeSave(errorMessage: "Bookmarks are not ready yet.")
+                return
+            }
+            let completion: BookmarkCoordinator.MutationCompletion = { errorMessage in
+                editor?.completeSave(errorMessage: errorMessage)
+            }
+            if let identifier {
+                coordinator.update(
+                    id: identifier,
+                    url: url,
+                    title: title,
+                    completion: completion
+                )
+            } else {
+                coordinator.add(
+                    url: url,
+                    title: title,
+                    completion: completion
+                )
+            }
+        }
+        editor.onRemove = { [weak self, weak editor] bookmark in
+            self?.bookmarkCoordinator?.delete(id: bookmark.id) { errorMessage in
+                editor?.completeRemoval(errorMessage: errorMessage)
+            }
+        }
+        bookmarkEditorSheetController = editor
+        return editor
     }
 
     private func handleNavigationFailure(
@@ -762,11 +1033,13 @@ final class BrowserWindowController: NSWindowController,
             relativeTo: webView
         )
         webView?.setAccessibilityValue("Failed")
+        renderBookmarkState()
     }
 
     private func hideError() {
         chromeView.errorView.isHidden = true
         errorAllowsRetry = false
+        renderBookmarkState()
     }
 
     private static func setAccessibilityIdentifier(

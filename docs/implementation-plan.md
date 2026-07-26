@@ -1,8 +1,9 @@
 # Browser Implementation Plan
 
-Status: Approved; Phases 1 and 2 complete; Phase 2 window-geometry follow-up
-implemented with functional verification passed; hands-on review and a clean
-performance rerun remain pending; Phase 3 bookmarks follow
+Status: Approved; Phases 1 and 2 complete; window geometry approved and
+committed; Phase 3 bookmarks implemented with Debug and Release functional
+verification green and normal workflow approved; recovery and
+launch-performance rerun pending
 Last updated: 2026-07-26
 Architecture: [architecture.md](architecture.md)
 
@@ -345,10 +346,10 @@ main browser window's size and location across a normal quit and relaunch.
 Phase 2 completed on 2026-07-26. The native single-page browser, functional and
 privacy behavior, Release configuration, launch/command benchmarks, and
 one-page resource gate are recorded in the project status and performance
-baseline. Its hands-on checkpoint was approved. Complete the window-geometry
-follow-up verification and review its results before Phase 3 adds bookmarks.
+baseline. Its hands-on checkpoint was approved. The window-geometry follow-up
+was also manually approved and committed as `aa8ee6a` before Phase 3 began.
 
-## 8. Phase 3 — Bookmarks and owned persistence
+## 8. Phase 3 — Bookmarks and owned persistence (implemented; gates pending)
 
 ### Goal
 
@@ -365,6 +366,8 @@ Persist only what the user explicitly asks the browser to remember.
 - Keep settings limited to required browser behavior.
 - Keep bookmark models, storage, and immutable snapshots independent of the
   future tab layer so Phase 4 can route them through the selected tab.
+- Keep the first bookmark library flat and searchable. Do not add a persistent
+  bookmarks bar or folder hierarchy until real use establishes that need.
 
 ### Tests
 
@@ -384,10 +387,41 @@ Persist only what the user explicitly asks the browser to remember.
 - Only explicitly bookmarked URLs enter application-owned persistence.
 - All bookmark workflows are keyboard accessible.
 
+### Implementation checkpoint
+
+The toolbar star and Command-D add or edit the current page.
+Option-Command-B opens a searchable, nonmodal manager with add, edit, delete,
+and open-in-current-page actions. Versioned models feed immutable snapshots
+from an actor-isolated repository that atomically writes `Bookmarks.json` and a
+last-valid backup under Application Support. Duplicate URLs are explicit, and
+malformed primary data is preserved while a valid backup is exposed read-only
+for restore or reset.
+
+Bookmark initialization is queued after native-window presentation, and
+performance launches do not create a bookmark repository. The Debug suites are
+green at 70 of 70 unit tests and 9 of 9 UI tests, including the complete normal
+bookmark workflow, keyboard routing, and relaunch persistence. The optimized
+10,000-bookmark gate passes at 63.164 ms load p95, 18.725 ms repository-search
+p95, and 18.536 ms manager-filter p95. The Release suites are green at 70 unit
+and 9 UI tests, and the production bundle passed architecture, signature,
+sandbox-entitlement, and hardened-runtime inspection. The full interaction run
+also passed, but the launch gate did not: first-frame median was 573.542 ms
+against 500 ms, and two Phase 2-relative launch comparisons exceeded their 10%
+budgets. The user approved the production add/edit/search/open/delete,
+keyboard-command, and relaunch-persistence workflow on 2026-07-26, including
+the intentionally absent bookmarks bar. Bookmark folders remain deferred. The
+manual recovery/reset exercise and a clean idle-desktop launch rerun remain
+pending. A fresh post-navigation container inspection found no Browser-owned
+history, visit, session, or navigation database; database-like files were
+confined to WebKit-managed website data. Therefore the Phase 3 exit criteria
+are not yet fully approved.
+
 ### Stopping point
 
-Use the bookmark workflows in the single-page browser. Back up, corrupt,
-recover, and restore the bookmark data once manually before Phase 4 adds tabs.
+Back up, corrupt, recover, restore or reset the bookmark data once, then clear
+the outstanding launch-performance gate before Phase 4 adds tabs. Revisit
+folders only after ordinary use shows the flat searchable library is
+insufficient.
 
 ## 9. Phase 4 — Tabs and web-view lifecycle
 

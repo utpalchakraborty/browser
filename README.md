@@ -5,16 +5,19 @@ WKWebView, targets Apple silicon and macOS 26 or later, stores no
 application-owned browsing history, and includes no telemetry or third-party
 runtime dependencies. Startup, CPU, and memory budgets are release gates.
 
-Phase 2 delivers the single-page browser checkpoint: a native toolbar,
-launch-focused address field, HTTP/HTTPS navigation, HTTPS-first host
-interpretation, configurable search, Back/Forward, Reload/Stop, progress,
-titles, and visible retryable errors.
+Phase 3 adds explicit, local bookmarks to the single-page browser: use the
+toolbar star or Command-D to add or edit the current page, and use the
+searchable Bookmarks manager to add, edit, delete, or open saved pages. Opening
+a bookmark replaces the current page until tabs arrive in Phase 4.
 
-This is a usable one-page pilot, not yet the daily-driver release. The Phase 2
-quality-of-life follow-up now remembers main-window geometry across relaunch;
-its functional verification passes. Bookmarks begin in Phase 3; tabs,
-privacy-management UI, downloads, and production content blocking remain later
-phases.
+This is now a usable one-page pilot, not yet the daily-driver release. It also
+remembers the main window's size and location across relaunch while continuing
+to launch with a blank page. Privacy controls, downloads, and production
+content blocking remain later phases. The Phase 3 live bookmark smoke test
+passed, and its keyboard-first workflow is approved; the manual recovery
+exercise is still pending. Debug and Release functional verification is green;
+the latest interaction and bookmark performance checks pass, while the launch
+gate needs a clean idle-desktop rerun.
 
 ## Requirements
 
@@ -64,7 +67,34 @@ address field and press Return.
 - Command-[ and Command-] navigate Back and Forward.
 - Command-R reloads.
 - Command-period stops an active load.
+- Command-D adds the current page as a bookmark, or edits it if already saved.
+- Option-Command-B opens the searchable Bookmarks manager.
 - Navigate > Search Provider selects DuckDuckGo, Google, or Bing.
+
+Bookmarks intentionally use a flat searchable manager rather than a persistent
+bookmarks bar. Folder hierarchy is deferred until ordinary use demonstrates a
+real need for it.
+
+## Bookmark data
+
+Bookmarks are versioned JSON stored locally in the app's sandbox at:
+
+~~~text
+~/Library/Containers/com.utpalchakraborty.browser/Data/Library/Application Support/com.utpalchakraborty.browser/
+~~~
+
+`Bookmarks.json` is the primary file and `Bookmarks.backup.json` is the last
+valid backup. Quit Browser before copying both files to export or back them up.
+To reset the active library, quit Browser and remove those two files;
+alternatively, use Restore Backup or Reset Bookmarks if Browser presents a
+recovery state. A malformed primary is preserved as
+`Bookmarks.corrupt.<identifier>.json` rather than silently overwritten, and the
+in-app recovery reset deliberately keeps those preserved copies. For complete
+bookmark erasure, quit Browser and also delete every preserved
+`Bookmarks.corrupt.*.json` file from this directory.
+
+Bookmarks are the only application-owned URLs written by this feature. Browser
+still creates no visit history and contains no telemetry.
 
 Start with [project status](docs/status.md), then see the approved
 [architecture](docs/architecture.md), the phased

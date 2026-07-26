@@ -1,6 +1,6 @@
 # Performance Baseline
 
-Status: Phase 1 historical baseline retained; Phase 2 baseline locked
+Status: Phase 1 historical baseline retained; Phase 2 baseline locked; Phase 3 interaction and bookmark gates pass; launch rerun pending
 Last updated: 2026-07-26
 
 ## Environment
@@ -18,6 +18,7 @@ Last updated: 2026-07-26
 | Runtime dependencies | Apple system frameworks only |
 | Phase 1 measured source state | Checkpoint `a726dc9`; see the collection note below |
 | Phase 2 measured source state | Checkpoint `1d3221f` |
+| Window-geometry checkpoint | `aa8ee6a`; manually approved |
 
 Raw results stay in ignored `.build` directories and are never uploaded. Phase
 2 is also recorded in `TestSupport/phase2_performance_baseline.json`, which is
@@ -28,6 +29,35 @@ in `a726dc9`; that hardening did not change the Release launch path in
 `AppDelegate` or `BrowserWindowController`. The production Release bundle was
 rebuilt and verified after those changes, and each result section records its
 exact raw artifact path.
+
+## Phase 3 measurement status
+
+Bookmark functionality has passed the Debug suites (70 unit tests and 9 UI
+tests). Its standalone optimized 10,000-bookmark gate also passes: load p95 is
+63.164 ms against a 100 ms limit; repository-search p95 is 18.725 ms and the
+manager's exact filter path is 18.536 ms against 50 ms limits. The fixture is
+2,398,938 bytes, is generated in a temporary directory, and contains no user
+data. The Release functional suites pass at 70 unit tests and 9 UI tests, and
+the production bundle passes architecture, signature, sandbox-entitlement, and
+hardened-runtime inspection.
+
+The production launch path presents and focuses the native window before it
+queues bookmark-repository startup. The repository performs file work in its
+actor rather than on the main actor. `--performance-test` launches do not
+construct a repository or touch the production bookmark files, preserving
+bookmark-store isolation.
+
+The full `make performance` run completed all samples. The interaction gates
+passed: address submission p95 was 0.758 ms, browser-command p95 was 0.187 ms,
+and local-navigation p95 was 24.206 ms. Application first-frame p95 was
+624.031 ms against the 800 ms ceiling, but its 573.542 ms median missed the
+500 ms ceiling. Relative to Phase 2, first-frame median/p95 changed by
++15.05%/+10.37%, and the readiness proxy changed by +10.03%/+7.17%; each
+comparison whose median exceeded the 10% budget failed. A clean idle-desktop
+launch rerun is therefore pending. A confirmation attempt was stopped after
+XCTest identified a foreground Ghostty window as an interrupting element, so
+it is not treated as evidence. Artifacts:
+`.build/PerformanceResults.QvWEvu/`.
 
 ## Protocol
 

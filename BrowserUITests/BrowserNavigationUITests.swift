@@ -151,6 +151,73 @@ final class BrowserNavigationUITests: XCTestCase {
         )
     }
 
+    func testBookmarksCanBeAddedEditedSearchedOpenedDeletedAndRelaunched() throws {
+        launchApplication()
+        defer { application.terminate() }
+        navigate(to: "/phase2/page-a")
+        XCTAssertTrue(pageText("Phase 2 Page A").waitForExistence(timeout: 5))
+        waitUntilEnabled(bookmarkButton)
+
+        application.typeKey("d", modifierFlags: .command)
+        XCTAssertTrue(
+            bookmarkEditor.waitForExistence(timeout: 3),
+            "Command-D did not present the bookmark editor."
+        )
+        replaceText(in: bookmarkTitleField, with: "Favorite Page A")
+        bookmarkSaveButton.click()
+        waitForButtonLabel(bookmarkButton, containing: "Edit Bookmark")
+
+        showBookmarks()
+        XCTAssertTrue(
+            pageText("Favorite Page A").waitForExistence(timeout: 3),
+            "The saved bookmark did not appear in the manager."
+        )
+
+        replaceText(in: bookmarkSearchField, with: "favorite")
+        XCTAssertTrue(pageText("Favorite Page A").waitForExistence(timeout: 2))
+        replaceText(in: bookmarkSearchField, with: "phase2/page-a")
+        XCTAssertTrue(pageText("Favorite Page A").waitForExistence(timeout: 2))
+        replaceText(in: bookmarkSearchField, with: "")
+
+        pageText("Favorite Page A").click()
+        application.typeKey("e", modifierFlags: .command)
+        XCTAssertTrue(bookmarkEditor.waitForExistence(timeout: 3))
+        replaceText(in: bookmarkTitleField, with: "Renamed Page A")
+        bookmarkSaveButton.click()
+        XCTAssertTrue(pageText("Renamed Page A").waitForExistence(timeout: 3))
+
+        application.terminate()
+        application.launchArguments = ["--ui-test-profile"]
+        application.launch()
+        XCTAssertTrue(mainWindow.waitForExistence(timeout: 5))
+        try assertAddressFieldIsFocused()
+        XCTAssertFalse(pageText("Phase 2 Page A").exists)
+
+        showBookmarks()
+        XCTAssertTrue(
+            pageText("Renamed Page A").waitForExistence(timeout: 3),
+            "The bookmark did not survive relaunch."
+        )
+        pageText("Renamed Page A").click()
+        application.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(
+            pageText("Phase 2 Page A").waitForExistence(timeout: 5),
+            "Opening the bookmark did not replace the current page."
+        )
+        waitForAddress(fixtureURL("/phase2/page-a"))
+
+        showBookmarks()
+        pageText("Renamed Page A").click()
+        application.typeKey(.delete, modifierFlags: [])
+        let confirmDeleteButton = application.sheets.buttons["Delete"].firstMatch
+        XCTAssertTrue(confirmDeleteButton.waitForExistence(timeout: 2))
+        confirmDeleteButton.click()
+        XCTAssertTrue(
+            pageText("Renamed Page A").waitForNonExistence(timeout: 3),
+            "Deleting the bookmark left it in the manager."
+        )
+    }
+
     func testNavigationIsNotRestoredAfterRelaunch() throws {
         launchApplication(ignoringSavedState: false)
         defer { application.terminate() }
@@ -181,7 +248,10 @@ final class BrowserNavigationUITests: XCTestCase {
     private func launchApplication(ignoringSavedState: Bool = true) {
         continueAfterFailure = false
         application = XCUIApplication()
-        application.launchArguments = ["--ui-test-profile"]
+        application.launchArguments = [
+            "--ui-test-profile",
+            "--reset-ui-test-bookmarks",
+        ]
         if ignoringSavedState {
             application.launchArguments += [
                 "-ApplePersistenceIgnoreState",
@@ -215,6 +285,38 @@ final class BrowserNavigationUITests: XCTestCase {
         application.buttons["BrowserReloadStopButton"]
     }
 
+    private var bookmarkButton: XCUIElement {
+        application.buttons["BrowserBookmarkButton"]
+    }
+
+    private var bookmarkEditor: XCUIElement {
+        application.descendants(matching: .any)["BrowserBookmarkEditorSheet"]
+    }
+
+    private var bookmarkTitleField: XCUIElement {
+        application.textFields["BrowserBookmarkTitleField"]
+    }
+
+    private var bookmarkSaveButton: XCUIElement {
+        application.buttons["BrowserBookmarkSaveButton"]
+    }
+
+    private var bookmarkSearchField: XCUIElement {
+        application.descendants(matching: .any)["BrowserBookmarkSearchField"]
+    }
+
+    private var bookmarkEditButton: XCUIElement {
+        application.buttons["BrowserBookmarkEditButton"]
+    }
+
+    private var bookmarkDeleteButton: XCUIElement {
+        application.buttons["BrowserBookmarkDeleteButton"]
+    }
+
+    private var bookmarkOpenButton: XCUIElement {
+        application.buttons["BrowserBookmarkOpenButton"]
+    }
+
     private var progressIndicator: XCUIElement {
         application.progressIndicators["BrowserLoadProgress"]
     }
@@ -236,6 +338,7 @@ final class BrowserNavigationUITests: XCTestCase {
             ("back button", backButton),
             ("forward button", forwardButton),
             ("reload button", reloadStopButton),
+            ("bookmark button", bookmarkButton),
         ] {
             XCTAssertTrue(
                 element.waitForExistence(timeout: 5),
@@ -290,6 +393,27 @@ final class BrowserNavigationUITests: XCTestCase {
         field.typeKey("a", modifierFlags: .command)
         field.typeText(text)
         field.typeKey(.return, modifierFlags: [])
+    }
+
+    private func showBookmarks() {
+        application.activate()
+        application.typeKey("b", modifierFlags: [.command, .option])
+        XCTAssertTrue(
+            application.windows["BrowserBookmarksWindow"]
+                .waitForExistence(timeout: 3),
+            "The Bookmarks manager did not appear."
+        )
+    }
+
+    private func replaceText(in field: XCUIElement, with text: String) {
+        XCTAssertTrue(field.waitForExistence(timeout: 3))
+        field.click()
+        field.typeKey("a", modifierFlags: .command)
+        if text.isEmpty {
+            field.typeKey(.delete, modifierFlags: [])
+        } else {
+            field.typeText(text)
+        }
     }
 
     private func waitForAddress(

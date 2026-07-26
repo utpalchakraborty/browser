@@ -4,6 +4,8 @@ set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 derived_data="$project_root/.build/PerformanceDerivedData"
+bookmark_benchmark_directory="$derived_data/BookmarkBenchmark"
+bookmark_benchmark_binary="$bookmark_benchmark_directory/BookmarkRepositoryBenchmark"
 
 case "${1:-}" in
     "")
@@ -30,17 +32,37 @@ xcodebuild \
     -parallel-testing-enabled NO \
     build-for-testing
 
+mkdir -p "$bookmark_benchmark_directory"
+xcrun --sdk macosx swiftc \
+    -O \
+    -whole-module-optimization \
+    -parse-as-library \
+    -swift-version 6 \
+    -strict-concurrency=complete \
+    -default-isolation MainActor \
+    -module-cache-path "$bookmark_benchmark_directory/ModuleCache" \
+    -D BOOKMARK_REPOSITORY_BENCHMARK \
+    "$project_root/Browser/Bookmark.swift" \
+    "$project_root/Browser/BookmarkSearch.swift" \
+    "$project_root/Browser/BookmarkRepository.swift" \
+    "$project_root/BrowserPerformanceTests/BookmarkRepositoryBenchmark.swift" \
+    -o "$bookmark_benchmark_binary"
+
 if [ "$build_only" -eq 1 ]; then
     exit 0
 fi
 
 result_directory=$(mktemp -d "$project_root/.build/PerformanceResults.XXXXXX")
+bookmark_benchmark_report="$result_directory/bookmark-benchmark.log"
 launch_result_bundle="$result_directory/BrowserLaunchPerformance.xcresult"
 interaction_result_bundle="$result_directory/BrowserInteractionPerformance.xcresult"
 fixture_port=18768
 fixture_token=${result_directory##*.}
 fixture_origin="http://127.0.0.1:$fixture_port"
 fixture_log="$result_directory/fixture-server.log"
+
+"$bookmark_benchmark_binary" >"$bookmark_benchmark_report"
+/bin/cat "$bookmark_benchmark_report"
 
 /usr/bin/python3 \
     "$project_root/TestSupport/fixture_server.py" \
@@ -94,6 +116,7 @@ xcodebuild \
 
 echo "Launch performance result bundle: $launch_result_bundle" >&2
 echo "Interaction performance result bundle: $interaction_result_bundle" >&2
+echo "Bookmark benchmark report: $bookmark_benchmark_report" >&2
 launch_metrics_json="$result_directory/launch-metrics.json"
 interaction_metrics_json="$result_directory/interaction-metrics.json"
 xcrun xcresulttool get test-results metrics \

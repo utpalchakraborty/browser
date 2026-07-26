@@ -6,6 +6,7 @@ final class BrowserChromeView: NSView {
     let forwardButton = NSButton()
     let reloadStopButton = NSButton()
     let addressField = NSTextField()
+    let bookmarkButton = NSButton()
     let progressIndicator = NSProgressIndicator()
     let pageContainer = NSView()
     let errorView = BrowserErrorView()
@@ -32,6 +33,13 @@ final class BrowserChromeView: NSView {
             label: "Reload",
             identifier: "BrowserReloadStopButton"
         )
+        configureNavigationButton(
+            bookmarkButton,
+            symbolName: "star",
+            label: "Add Bookmark",
+            identifier: "BrowserBookmarkButton"
+        )
+        bookmarkButton.isEnabled = false
 
         addressField.translatesAutoresizingMaskIntoConstraints = false
         addressField.bezelStyle = .roundedBezel
@@ -63,6 +71,7 @@ final class BrowserChromeView: NSView {
             forwardButton,
             reloadStopButton,
             addressField,
+            bookmarkButton,
         ])
         controls.translatesAutoresizingMaskIntoConstraints = false
         controls.orientation = .horizontal
@@ -99,6 +108,7 @@ final class BrowserChromeView: NSView {
             backButton.widthAnchor.constraint(equalToConstant: 30),
             forwardButton.widthAnchor.constraint(equalToConstant: 30),
             reloadStopButton.widthAnchor.constraint(equalToConstant: 30),
+            bookmarkButton.widthAnchor.constraint(equalToConstant: 30),
             addressField.widthAnchor.constraint(greaterThanOrEqualToConstant: 260),
 
             separator.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
@@ -142,6 +152,17 @@ final class BrowserChromeView: NSView {
         )
         reloadStopButton.toolTip = label
         reloadStopButton.setAccessibilityLabel(label)
+    }
+
+    func updateBookmarkButton(isBookmarked: Bool, isEnabled: Bool) {
+        let label = isBookmarked ? "Edit Bookmark" : "Add Bookmark"
+        bookmarkButton.image = NSImage(
+            systemSymbolName: isBookmarked ? "star.fill" : "star",
+            accessibilityDescription: label
+        )
+        bookmarkButton.toolTip = label
+        bookmarkButton.setAccessibilityLabel(label)
+        bookmarkButton.isEnabled = isEnabled
     }
 
     private func configureNavigationButton(
