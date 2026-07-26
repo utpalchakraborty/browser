@@ -19,6 +19,11 @@ final class BrowserWindowController: NSWindowController,
     WKNavigationDelegate,
     WKUIDelegate
 {
+    static let mainWindowFrameAutosaveName: NSWindow.FrameAutosaveName =
+        "BrowserMainWindow"
+    static let uiTestWindowFrameAutosaveName: NSWindow.FrameAutosaveName =
+        "BrowserMainWindow.UITests"
+
     private(set) var webViews: [WKWebView] = []
     var webView: WKWebView? { webViews.first }
 
@@ -42,7 +47,10 @@ final class BrowserWindowController: NSWindowController,
     private var submittedNavigation: WKNavigation?
     private var submittedNavigationState: OSSignpostIntervalState?
 
-    init(searchProvider: SearchProvider = .defaultProvider) {
+    init(
+        searchProvider: SearchProvider = .defaultProvider,
+        frameAutosaveName: NSWindow.FrameAutosaveName? = nil
+    ) {
         self.searchProvider = searchProvider
         addressInterpreter = AddressInterpreter(searchProvider: searchProvider)
         chromeView = BrowserChromeView(searchProviderName: searchProvider.displayName)
@@ -63,6 +71,12 @@ final class BrowserWindowController: NSWindowController,
         window.contentView = chromeView
 
         super.init(window: window)
+
+        if let frameAutosaveName {
+            windowFrameAutosaveName = frameAutosaveName
+            _ = window.setFrameUsingName(frameAutosaveName)
+            _ = window.setFrameAutosaveName(frameAutosaveName)
+        }
 
         window.delegate = self
         chromeView.addressField.delegate = self

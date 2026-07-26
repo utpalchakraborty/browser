@@ -4,7 +4,10 @@ Last updated: 2026-07-26
 
 ## Current phase
 
-Phase 2 — complete. Phase 3 has not started and awaits checkpoint review.
+Phase 2 — complete and checkpoint approved. A narrow Phase 2 quality-of-life
+follow-up for window geometry is implemented with functional verification
+passed; hands-on review and a clean performance rerun remain pending. Phase 3
+bookmarks and owned persistence have not started; tabs now follow in Phase 4.
 
 The checkpoint is a usable native single-page browser. It accepts HTTP and
 HTTPS URLs, infers HTTPS for plausible hosts, searches plain text, and exposes
@@ -16,7 +19,7 @@ WKWebView GO decision remains unchanged.
 - Native toolbar with a launch-focused address field, Back, Forward,
   Reload/Stop, progress, page title, and displayed final URL.
 - HTTPS-first address interpretation plus DuckDuckGo, Google, and Bing search
-  selection. Only the selected provider is application-owned persistent state.
+  selection. The selected provider is application-owned persistent state.
 - Sanitized connection, TLS, redirect, timeout, generic navigation, and
   WebContent-process errors, with retry where recovery is meaningful.
 - HTTP/HTTPS top-level navigation policy, explicit unsupported-scheme blocking,
@@ -28,6 +31,30 @@ WKWebView GO decision remains unchanged.
   navigation shortcuts.
 - No third-party runtime dependencies, telemetry, or application-owned visit
   history.
+
+## Implemented Phase 2 QoL follow-up
+
+The implementation remembers only the main browser window's last usable size
+and location through AppKit's native frame autosave. AppKit applies the saved
+frame for the current display environment, while the browser keeps its centered
+default when there is no usable saved frame. AppKit state restoration stays
+disabled, and relaunch must remain blank with the address field focused; no URL,
+page, back/forward, or future tab state may be restored.
+
+The Debug unit suite passed 48 tests, including isolated native-frame save and
+restore plus launch-mode coverage. The Debug UI suite passed all 8 tests,
+including the blank relaunch and focused-address-field invariant. Artifacts:
+`.build/TestResults.mxVJk2/Browser.xcresult` and
+`.build/TestResults.UYdLip/Browser.xcresult`.
+
+A post-change Release performance run completed every launch, navigation, and
+command sample. The browser-specific comparisons stayed within the 10%
+regression budget, including a 91.364 ms median native-window presentation, but
+XCTest's outer first-frame median was 547.960 ms against the 500 ms absolute
+ceiling. The p95 was 599.275 ms against its 800 ms ceiling. The overall gate is
+therefore not yet green; rerun it on an otherwise idle desktop because separate
+confirmation attempts were invalidated by foreground-window interference.
+Artifact: `.build/PerformanceResults.NfA7if/`.
 
 Detailed design and historical evidence:
 
@@ -68,10 +95,11 @@ evidence is desired.
 
 ## Known Phase 2 limitations
 
-There is one page and one window. Tabs, bookmarks, privacy-management UI,
-downloads, production filter lists, and private windows remain later phases.
+There is one page and one window. Bookmarks remain Phase 3 work; tabs,
+privacy-management UI, downloads, production filter lists, and private windows
+remain later phases.
 Programmatic popups are suppressed; a user-activated new-window link replaces
-the current page until Phase 3 adds tabs.
+the current page until Phase 4 adds tabs.
 
 DNS and TLS presentations have deterministic unit coverage; the end-to-end UI
 retry scenario uses a refused localhost connection. Representative real-site
@@ -80,5 +108,8 @@ automated gate.
 
 ## Next action
 
-Use the single-page browser with representative sites and review the
-checkpoint. Begin Phase 3 only after explicit approval.
+Move and resize the browser, quit, and relaunch to verify the production window
+returns to the expected frame while the page remains blank. Rerun
+`make performance` on an idle desktop to clear the first-frame absolute gate.
+Review that narrow checkpoint, then begin Phase 3 bookmarks. Tabs wait for
+Phase 4.

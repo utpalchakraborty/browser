@@ -90,7 +90,7 @@ would require a separate privacy, integrity, rollback, and performance review.
   packets, and reported equal received and metadata-filter-drop counts. Other
   malformed or inconsistent captures fail closed.
 - Repeated view teardown and leak inspection are intentionally moved to Phase
-  3's real TabController and 100-cycle churn gate. Phase 1's one- and ten-view
+  4's real TabController and 100-cycle churn gate. Phase 1's one- and ten-view
   results cover fixed/resident cost; an artificial disposable teardown path
   would not validate the production observer and delegate ownership graph.
 

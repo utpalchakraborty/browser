@@ -17,11 +17,11 @@ Last updated: 2026-07-26
 | Build configuration | Release, no debugger, sanitizers, or code coverage |
 | Runtime dependencies | Apple system frameworks only |
 | Phase 1 measured source state | Checkpoint `a726dc9`; see the collection note below |
-| Phase 2 measured source state | Uncommitted Phase 2 checkpoint working tree on `3652a3d` |
+| Phase 2 measured source state | Checkpoint `1d3221f` |
 
 Raw results stay in ignored `.build` directories and are never uploaded. Phase
 2 is also recorded in `TestSupport/phase2_performance_baseline.json`, which is
-the machine-readable comparison point for Phase 3.
+the machine-readable comparison point for subsequent phases.
 
 The Phase 1 launch and resource runs predate final test/audit-harness hardening
 in `a726dc9`; that hardening did not change the Release launch path in

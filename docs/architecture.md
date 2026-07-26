@@ -35,6 +35,7 @@ The initial product must:
 | Application structure | One application target plus unit, UI, and performance test targets | Keeps the small application understandable; split modules only when a measured need appears. |
 | Normal browser storage | One explicit persistent WKWebsiteDataStore profile | Cookies and site data remain separate from other browsers while WebKit retains responsibility for its own storage. |
 | Bookmarks | Versioned Codable JSON written atomically | The data set is small and does not justify a database or third-party library. |
+| Window geometry | Use AppKit frame autosave for the main window only | Restores a useful size and location without retaining browsing or session state. |
 | Content blocking | Compiled WKContentRuleList rules | Blocking happens inside WebKit without an application callback for every request. |
 | History and sessions | Memory only | No visit database, recently closed list, persisted tabs, or automatic session restoration. |
 | Security boundary | App Sandbox and hardened runtime | Limits damage if untrusted web content or application code is compromised. |
@@ -129,14 +130,16 @@ behavior:
 ### Application layer
 
 AppDelegate owns process lifecycle, creates windows, installs application menus,
-and prevents macOS from restoring browser windows or tab URLs.
+and disables AppKit state restoration so macOS cannot reconstruct browser
+windows, web content, or tab URLs.
 
 BrowserWindowController owns one browser window, including:
 
 - the tab strip;
 - address field and navigation buttons;
 - selected page container;
-- keyboard focus and command routing; and
+- keyboard focus and command routing;
+- configuration of native frame autosave for the main window; and
 - presentation of bookmark and privacy management windows.
 
 There is no global navigation singleton. Commands are routed to the selected tab
@@ -295,7 +298,8 @@ request.
 | Data | Owner | Purpose | User deletion |
 | --- | --- | --- | --- |
 | Bookmarks | BookmarkRepository | Explicitly saved pages | Delete individually or reset bookmarks |
-| Required preferences | UserDefaults | Search provider, UI choices, blocker enabled state | Reset settings |
+| Required preferences | UserDefaults | Search provider and blocker enabled state | Reset settings |
+| Main window frame | UserDefaults through AppKit frame autosave | Reopen at the last usable size and location | Reset settings |
 | Per-site blocker exceptions | SitePolicyStore | Explicit user choices | Remove individually or reset exceptions |
 | Cookies | WKWebsiteDataStore | Login and website behavior | Cookie item, domain, or clear-all controls |
 | Caches and other site data | WKWebsiteDataStore | Performance and website functionality | Domain or clear-all controls |
@@ -312,8 +316,14 @@ No application-owned file may contain a passive list of navigated URLs.
 - Popup routing state.
 - Per-tab last-activation timestamps.
 
-Browser windows are non-restorable. A normal quit and relaunch starts with one
-blank local tab and a focused address field.
+Window geometry is not browsing state. A normal quit and relaunch may restore
+only the main-window frame through AppKit's native frame-autosave behavior.
+AppKit constrains restored geometry for the current display environment; if it
+cannot apply saved geometry, the browser retains its usable centered default.
+
+Browser windows remain non-restorable through AppKit state restoration. Every
+normal relaunch starts with one blank local tab and a focused address field; it
+never restores a URL, title, web view, back/forward list, or tab collection.
 
 ### Meaning of no history
 
@@ -472,6 +482,7 @@ dependency-injection infrastructure.
 ### Unit tests
 
 - Address and search interpretation.
+- Native frame-autosave configuration and launch-mode isolation.
 - Tab selection, closure, and ordering rules.
 - Navigation, external-scheme, and popup policy.
 - Bookmark encoding, atomic replacement, recovery, and migrations.
@@ -489,6 +500,7 @@ pages for:
 - local storage and broader website-data deletion;
 - content-rule request blocking and exceptions;
 - downloads and authentication;
+- relaunch with restored window geometry but no restored browsing state;
 - tab switching without reload; and
 - web-content process recovery where automation permits.
 

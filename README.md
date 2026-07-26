@@ -10,9 +10,11 @@ launch-focused address field, HTTP/HTTPS navigation, HTTPS-first host
 interpretation, configurable search, Back/Forward, Reload/Stop, progress,
 titles, and visible retryable errors.
 
-This is a usable one-page pilot, not yet the daily-driver release. Tabs,
-bookmarks, privacy-management UI, downloads, and production content blocking
-remain later phases.
+This is a usable one-page pilot, not yet the daily-driver release. The Phase 2
+quality-of-life follow-up now remembers main-window geometry across relaunch;
+its functional verification passes. Bookmarks begin in Phase 3; tabs,
+privacy-management UI, downloads, and production content blocking remain later
+phases.
 
 ## Requirements
 
@@ -45,7 +47,7 @@ make network-audit
 ~~~
 
 `make resource-ten` remains a synthetic ten-resident-view scalability probe;
-it is not a tab benchmark. Tabs begin in Phase 3.
+it is not a tab benchmark. Tabs begin in Phase 4.
 
 ## Use
 

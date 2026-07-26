@@ -39,6 +39,99 @@ final class BrowserWindowControllerTests: XCTestCase {
         )
     }
 
+    func testWindowFrameAutosaveRestoresOnlyGeometry() throws {
+        let autosaveName: NSWindow.FrameAutosaveName =
+            "BrowserWindowControllerTests.\(UUID().uuidString)"
+        var autosaveWindows: [NSWindow] = []
+        defer {
+            autosaveWindows.forEach {
+                _ = $0.setFrameAutosaveName("")
+            }
+            NSWindow.removeFrame(usingName: autosaveName)
+        }
+
+        let firstController = BrowserWindowController(
+            frameAutosaveName: autosaveName
+        )
+        let firstWindow = try XCTUnwrap(firstController.window)
+        autosaveWindows.append(firstWindow)
+        var savedFrame = firstWindow.frame
+        savedFrame.size.width -= 120
+        savedFrame.size.height -= 80
+        savedFrame.origin.x += 40
+        savedFrame.origin.y += 20
+        savedFrame = firstWindow.constrainFrameRect(
+            savedFrame,
+            to: firstWindow.screen
+        )
+        firstWindow.setFrame(savedFrame, display: false)
+        firstWindow.saveFrame(usingName: autosaveName)
+        _ = firstWindow.setFrameAutosaveName("")
+
+        let restoredController = BrowserWindowController(
+            frameAutosaveName: autosaveName
+        )
+        let restoredWindow = try XCTUnwrap(restoredController.window)
+        autosaveWindows.append(restoredWindow)
+
+        XCTAssertEqual(restoredController.windowFrameAutosaveName, autosaveName)
+        XCTAssertEqual(restoredWindow.frameAutosaveName, autosaveName)
+        XCTAssertEqual(
+            restoredWindow.frame.origin.x,
+            savedFrame.origin.x,
+            accuracy: 1
+        )
+        XCTAssertEqual(
+            restoredWindow.frame.origin.y,
+            savedFrame.origin.y,
+            accuracy: 1
+        )
+        XCTAssertEqual(
+            restoredWindow.frame.width,
+            savedFrame.width,
+            accuracy: 1
+        )
+        XCTAssertEqual(
+            restoredWindow.frame.height,
+            savedFrame.height,
+            accuracy: 1
+        )
+        XCTAssertFalse(restoredWindow.isRestorable)
+        XCTAssertNil(restoredController.webView)
+    }
+
+    func testWindowFrameAutosaveNameIsolatedByLaunchMode() {
+        XCTAssertEqual(
+            AppDelegate.windowFrameAutosaveName(arguments: ["Browser"]),
+            BrowserWindowController.mainWindowFrameAutosaveName
+        )
+        XCTAssertEqual(
+            AppDelegate.windowFrameAutosaveName(
+                arguments: [
+                    "Browser",
+                    "--ui-test-profile",
+                    "-ApplePersistenceIgnoreState",
+                    "YES",
+                ]
+            ),
+            BrowserWindowController.uiTestWindowFrameAutosaveName
+        )
+        XCTAssertNil(
+            AppDelegate.windowFrameAutosaveName(
+                arguments: ["Browser", "--performance-test"]
+            )
+        )
+        XCTAssertNil(
+            AppDelegate.windowFrameAutosaveName(
+                arguments: [
+                    "Browser",
+                    "-ApplePersistenceIgnoreState",
+                    "YES",
+                ]
+            )
+        )
+    }
+
     func testHiddenWindowDoesNotConstructWebView() {
         let controller = BrowserWindowController()
         let profile = BrowserProfile(dataStoreIdentifier: UUID())

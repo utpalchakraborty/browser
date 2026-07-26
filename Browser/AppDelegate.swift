@@ -40,7 +40,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "InitialWindowPresentation"
         )
         let controller = BrowserWindowController(
-            searchProvider: BrowserPreferences.searchProvider()
+            searchProvider: BrowserPreferences.searchProvider(),
+            frameAutosaveName: Self.windowFrameAutosaveName(
+                arguments: CommandLine.arguments
+            )
         )
         browserWindowController = controller
         installMainMenu(navigationTarget: controller)
@@ -115,6 +118,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldRestoreApplicationState(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    static func windowFrameAutosaveName(
+        arguments: [String]
+    ) -> NSWindow.FrameAutosaveName? {
+        if arguments.contains("--ui-test-profile") {
+            return BrowserWindowController.uiTestWindowFrameAutosaveName
+        }
+        if arguments.contains("--performance-test")
+            || arguments.contains("-ApplePersistenceIgnoreState")
+        {
+            return nil
+        }
+        return BrowserWindowController.mainWindowFrameAutosaveName
     }
 
     static func performanceViewCount(arguments: [String]) -> Int {

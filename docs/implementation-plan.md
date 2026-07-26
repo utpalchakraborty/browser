@@ -1,6 +1,8 @@
 # Browser Implementation Plan
 
-Status: Approved; Phases 1 and 2 complete; Phase 3 awaiting checkpoint review
+Status: Approved; Phases 1 and 2 complete; Phase 2 window-geometry follow-up
+implemented with functional verification passed; hands-on review and a clean
+performance rerun remain pending; Phase 3 bookmarks follow
 Last updated: 2026-07-26
 Architecture: [architecture.md](architecture.md)
 
@@ -168,9 +170,9 @@ incremental-per-fixture-tab budget. The replacement must still be concrete.
   window scope.
 - Approve or revise the provisional performance budgets.
 - Select a small representative compatibility set from the sites the user
-  actually needs during the single-page and tabbed-browser pilot. Phase 0
-  defines the categories; exact sites are selected before Phase 5 blocking
-  acceptance rather than guessed before a usable browser exists.
+  actually needs during the single-page, bookmarked, and tabbed-browser pilot.
+  Phase 0 defines the categories; exact sites are selected before Phase 5
+  blocking acceptance rather than guessed before a usable browser exists.
 
 ### Deliverables
 
@@ -239,7 +241,7 @@ product polish.
 - Privileged pktap capture with a positive attribution control for production
   blank launch and at least 30 seconds of settled idle time.
 
-Repeated creation/destruction and leak inspection now belong to Phase 3's
+Repeated creation/destruction and leak inspection now belong to Phase 4's
 production TabController lifecycle and 100-cycle churn gate. Phase 1 measures
 one and ten resident views instead. Testing a disposable scaffold's artificial
 deallocation path would not validate the ownership and observer teardown that
@@ -302,15 +304,92 @@ page.
 - Startup, response, CPU, and one-tab memory gates pass.
 - There are no third-party runtime dependencies.
 
+### QoL follow-up before Phase 3
+
+The approved single-page checkpoint remains complete. Before adding the next
+feature layer, add one narrowly scoped quality-of-life behavior: remember the
+main browser window's size and location across a normal quit and relaunch.
+
+#### Work
+
+- Persist only the main window frame through AppKit's native frame autosave.
+- Use a stable production autosave name, an isolated UI-test name, and no frame
+  autosave for fixed-geometry performance launches.
+- Restore the frame independently of AppKit state restoration and retain the
+  centered default when no usable saved frame exists.
+- Keep URL, title, web-view, back/forward, and future tab state memory-only.
+- Preserve the blank-page relaunch and launch-focused address field.
+
+#### Tests
+
+- Unit coverage that saves a frame under an isolated name and verifies a new
+  controller restores it without becoming state-restorable.
+- Unit coverage for production, UI-test, and performance launch-mode isolation.
+- A manual check that moves and resizes the production window, quits, and
+  verifies the frame returns after relaunch.
+- Navigate before quitting and verify relaunch restores the frame but no URL,
+  page, back/forward state, or address-field content.
+- Recheck the launch and browser-command regression gates.
+
+#### Exit criteria
+
+- A normal relaunch returns the main window to its last usable size and
+  location.
+- Stale or invalid geometry cannot make the browser window inaccessible.
+- Window geometry is the only newly persisted state, remains locally resettable,
+  and contains no browsing data.
+- The no-history, blank-relaunch, focus, and performance invariants still pass.
+
 ### Stopping point
 
 Phase 2 completed on 2026-07-26. The native single-page browser, functional and
 privacy behavior, Release configuration, launch/command benchmarks, and
 one-page resource gate are recorded in the project status and performance
-baseline. Stop for hands-on review and explicit approval before Phase 3 adds
-tabs.
+baseline. Its hands-on checkpoint was approved. Complete the window-geometry
+follow-up verification and review its results before Phase 3 adds bookmarks.
 
-## 8. Phase 3 — Tabs and web-view lifecycle
+## 8. Phase 3 — Bookmarks and owned persistence
+
+### Goal
+
+Persist only what the user explicitly asks the browser to remember.
+
+### Work
+
+- Implement versioned Bookmark and BookmarkFile models.
+- Implement actor-isolated atomic storage and a last-valid backup.
+- Add bookmark, edit, delete, list, search, and open-in-current-page workflows.
+- Handle duplicates deliberately without silently multiplying entries.
+- Add visible recovery for malformed or unmigratable data.
+- Add reset/export documentation for the local bookmark file.
+- Keep settings limited to required browser behavior.
+- Keep bookmark models, storage, and immutable snapshots independent of the
+  future tab layer so Phase 4 can route them through the selected tab.
+
+### Tests
+
+- Round-trip and schema-version tests.
+- Atomic replacement and interrupted-write scenarios.
+- Corrupt primary file and valid-backup recovery.
+- Duplicate and invalid URL handling.
+- UI tests for all bookmark operations against the current page.
+- Search and load benchmark with a deliberately large bookmark fixture.
+- Container inspection after navigation to confirm that no application history
+  file exists.
+
+### Exit criteria
+
+- Bookmarks survive relaunch and are recoverable.
+- Bookmark I/O never blocks typing, navigation, or browser-owned commands.
+- Only explicitly bookmarked URLs enter application-owned persistence.
+- All bookmark workflows are keyboard accessible.
+
+### Stopping point
+
+Use the bookmark workflows in the single-page browser. Back up, corrupt,
+recover, and restore the bookmark data once manually before Phase 4 adds tabs.
+
+## 9. Phase 4 — Tabs and web-view lifecycle
 
 ### Goal
 
@@ -321,7 +400,7 @@ responsiveness problem.
 
 - Implement TabManager and TabController.
 - Add new, close, select, and reorder behavior.
-- Route commands to the selected tab in the key window.
+- Route navigation and bookmark commands to the selected tab in the key window.
 - Add familiar tab keyboard shortcuts.
 - Route user-initiated popup and target-blank navigation to a new tab.
 - Keep tab title, URL, progress, and navigation state independent.
@@ -339,61 +418,27 @@ suspension, or session restoration.
   tab.
 - Unit tests for reorder and command routing.
 - UI tests for tab creation, switching, closing, shortcuts, and popup routing.
+- Verify bookmark creation captures the selected tab and bookmark opening targets
+  the selected tab.
 - Verify switching does not reload a resident page.
-- Verify quit/relaunch restores no URL or tab.
-- Ten-tab switching benchmark.
+- Verify quit/relaunch restores window geometry but no URL or tab.
+- Rerun bookmark load/search checks alongside the ten-tab switching benchmark.
 - One-hundred-cycle tab churn and leak test.
 - Content-process termination recovery test where automation permits.
 
 ### Exit criteria
 
-- Closing or switching can never operate on the wrong web view.
+- Closing, switching, and bookmark commands can never operate on the wrong web
+  view.
 - Closed tab URLs are not retained.
-- Existing-tab switching meets the latency budget.
+- Existing-tab switching meets the latency budget, including while bookmark
+  data is loaded.
 - Memory settles after churn and remains within the locked tab budget.
 
 ### Stopping point
 
-Use the browser for ordinary multi-tab browsing and record friction before
-adding persistence.
-
-## 9. Phase 4 — Bookmarks and owned persistence
-
-### Goal
-
-Persist only what the user explicitly asks the browser to remember.
-
-### Work
-
-- Implement versioned Bookmark and BookmarkFile models.
-- Implement actor-isolated atomic storage and a last-valid backup.
-- Add bookmark, edit, delete, list, search, and open workflows.
-- Handle duplicates deliberately without silently multiplying entries.
-- Add visible recovery for malformed or unmigratable data.
-- Add reset/export documentation for the local bookmark file.
-- Keep settings limited to required browser behavior.
-
-### Tests
-
-- Round-trip and schema-version tests.
-- Atomic replacement and interrupted-write scenarios.
-- Corrupt primary file and valid-backup recovery.
-- Duplicate and invalid URL handling.
-- UI tests for all bookmark operations.
-- Search and load benchmark with a deliberately large bookmark fixture.
-- Container inspection after navigation to confirm that no application history
-  file exists.
-
-### Exit criteria
-
-- Bookmarks survive relaunch and are recoverable.
-- Bookmark I/O never blocks typing, navigation, or tab switching.
-- Only explicitly bookmarked URLs enter application-owned persistence.
-- All bookmark workflows are keyboard accessible.
-
-### Stopping point
-
-Back up, corrupt, recover, and restore the bookmark data once manually.
+Use the browser for ordinary multi-tab browsing with bookmarks and record
+friction before adding privacy controls and content blocking.
 
 ## 10. Phase 5 — Privacy controls and content blocking
 
@@ -533,8 +578,8 @@ Turn the proven daily-driver build into a reproducible local release.
 | --- | --- | --- |
 | Display web pages | Phase 2 | Local and real-site navigation tests |
 | Fast startup and navigation | Phases 1, 2, and 7 | XCTest metrics and Instruments baseline |
-| Tabs | Phase 3 | Tab behavior, churn, and switching tests |
-| Bookmarks | Phase 4 | Persistence, recovery, and UI tests |
+| Tabs | Phase 4 | Tab behavior, churn, and switching tests |
+| Bookmarks | Phase 3 | Persistence, recovery, and UI tests |
 | Separate cookies | Phase 1 | Explicit WebKit profile persistence test |
 | Inspect/delete cookies | Phase 5 | Cookie fixture and relaunch tests |
 | Delete broader site data | Phase 5 | Per-domain and clear-all integration tests |
