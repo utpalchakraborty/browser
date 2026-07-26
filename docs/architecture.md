@@ -1,6 +1,6 @@
 # Browser Architecture
 
-Status: Proposed for review
+Status: Approved for macOS implementation
 Last updated: 2026-07-26
 
 ## 1. Purpose
@@ -27,6 +27,7 @@ The initial product must:
 | Area | Decision | Reason |
 | --- | --- | --- |
 | Platform | Apple silicon and macOS 26 or later | This is a personal-use application for the current Mac, so compatibility layers are unnecessary. |
+| Product identity | Browser, bundle identifier com.utpalchakraborty.browser | Simple local identity matching the repository; distribution naming is out of scope. |
 | Language | Swift 6 | Native system APIs, strong concurrency checking, and no language bridge in the hot path. |
 | Application UI | AppKit | Mature macOS window, keyboard, menu, and view-lifecycle control with predictable overhead. |
 | Web engine | WKWebView from WebKit | A maintained, native, multiprocess engine rather than a new renderer or a bundled browser runtime. |
@@ -215,8 +216,8 @@ AddressInterpreter is a pure, independently tested value component:
 5. Do not request remote search suggestions.
 
 Changing the search provider changes who receives search terms. The first
-implementation must make the provider visible and configurable. The exact
-default remains a product decision before Phase 2.
+implementation must make the provider visible and configurable. The approved
+Phase 2 default is DuckDuckGo without live suggestions.
 
 ### Bookmarks
 
@@ -266,16 +267,23 @@ ContentBlockerService:
 - atomically keeps the last valid compiled rules if an update fails; and
 - applies rules through WKUserContentController.
 
-The first release ships a pinned ruleset. It does not contact an update server
-at launch. Before selecting that list, Phase 1 must verify its license, WebKit
-rule compatibility, conversion correctness, size, compile time, and false
-positive behavior.
+The first release will use pinned AdGuard Base and Tracking Protection filter
+sources. A pinned release of AdGuard Safari Converter will run only as a
+developer-side command-line tool; it is never linked into or shipped with the
+browser. Source and converter are GPL-3.0, which is acceptable for this
+personal-use project but must be re-audited before any distribution. Generated
+rules record source and tool hashes, conversion counts, attribution, and
+licenses. Normal launch never downloads or converts a list.
 
-A small test must also prove the per-site exception design. WebKit supports
-declarative exceptions, but the exact compile, attachment, and reload sequence
-must be measured before the interface is committed. Blocking failures must not
-silently prevent all browsing; the last valid rules remain active and the user
-gets a visible status.
+Phase 1 proved WKContentRuleList rule ordering, cached attachment cost, and a
+live exception on/off sequence that replaces the attached list and explicitly
+reloads an already-loaded fixture page. Phase 5 pins the exact inputs and must
+validate production-list conversion, unsupported rules, cold compile time,
+size, false positives, persistent exception state, UI feedback, and the
+real-site smoke set before bundling the output. Updates remain manual and
+release-bound; there is no automatic filter network request. Blocking failures
+must not silently prevent all browsing; the last valid rules remain active and
+the user gets a visible status.
 
 The browser will not proxy traffic or run arbitrary filter code for each
 request.
@@ -429,9 +437,11 @@ Navigation completion is never treated as a signal to persist a visit.
 - Closing a tab releases observers and delegates; churn tests check for
   monotonic memory growth.
 
-## 11. Source layout
+## 11. Planned source layout
 
-The initial repository should remain one small Xcode application:
+Phase 1 deliberately keeps its validation scaffold flat. Starting with the
+Phase 2 browser shell, the repository should remain one small Xcode application
+and grow toward this ownership-oriented layout as components are introduced:
 
 ~~~text
 Browser.xcodeproj
@@ -564,17 +574,26 @@ hypothetical port. If cross-platform becomes a real requirement, the project
 should make an explicit new architecture decision rather than pretending the
 native Swift UI is portable.
 
-## 14. Decisions still required
+## 14. Product defaults and remaining evidence
 
-These do not block approval of the overall architecture, but they must be
-resolved at the named implementation phase:
+Approved defaults:
 
-1. Product name and bundle identifier before creating the Xcode project.
-2. Default search provider before implementing address-field search.
-3. Blocklist source, license, conversion method, and update policy in Phase 1.
-4. Absolute memory budgets after measuring the minimal WebKit baseline.
-5. Whether private windows belong in the minimum usable release or the
-   daily-driver hardening phase.
+1. Product name: Browser.
+2. Bundle identifier: com.utpalchakraborty.browser.
+3. Default search provider: DuckDuckGo, configurable, with no live suggestions.
+4. Private windows are deferred to daily-driver hardening.
+5. Cross-platform support is not planned.
+
+Phase 1 established:
+
+1. AdGuard Base and Tracking Protection as the planned filter sources, with a
+   pinned AdGuard Safari Converter command-line conversion in Phase 5;
+2. manual, release-bound filter updates with no silent network request; and
+3. locked absolute CPU, memory, launch, and cached-rule attachment budgets in
+   [performance-baseline.md](performance-baseline.md).
+
+The measured WebKit API and platform risk decision is recorded in
+[phase-1-risk-report.md](phase-1-risk-report.md).
 
 ## 15. Primary references
 

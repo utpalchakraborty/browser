@@ -1,6 +1,6 @@
 # Browser Implementation Plan
 
-Status: Proposed for review
+Status: Approved; Phase 1 complete; Phase 2 awaiting review
 Last updated: 2026-07-26
 Architecture: [architecture.md](architecture.md)
 
@@ -15,6 +15,10 @@ Architecture: [architecture.md](architecture.md)
 - A persistent browser-specific WebKit profile with visible deletion controls.
 - Advertising and tracker blocking without a per-request proxy layer.
 - Planning and explicit phase approval before production code.
+- Product name Browser with bundle identifier com.utpalchakraborty.browser.
+- DuckDuckGo as the configurable default search provider, without live
+  suggestions.
+- Private windows deferred to daily-driver hardening.
 
 The first usable release is successful when it can serve as a fast personal
 browser for ordinary use with navigation, tabs, bookmarks, and understandable
@@ -22,43 +26,30 @@ privacy controls. Feature count is not a success metric.
 
 ## 2. Development prerequisites
 
-### Required now
+### Toolchain status
 
-The full Xcode application is required before Phase 1. The current Mac has
-Swift 6.3.3 and the standalone Command Line Tools, but Xcode.app is not
-installed.
+Phase 1 uses the verified local toolchain:
 
-Install the current full Xcode compatible with macOS 26 from the Mac App Store
-or Apple's developer downloads, then open it once so it can install additional
-components and finish first-run setup. A paid Apple Developer Program
-membership is not required for a personal build that runs locally.
+- Xcode 26.6, build 17F113;
+- macOS 26.5 SDK;
+- Swift 6.3.3;
+- Apple silicon arm64 target; and
+- /Applications/Xcode.app/Contents/Developer as the selected developer
+  directory.
 
-After installation, verify:
+The repeatable verification commands are:
 
 ~~~sh
 xcodebuild -version
 xcode-select -p
 ~~~
 
-If the selected path still points to CommandLineTools, switch it during Phase 1
-to:
-
-~~~text
-/Applications/Xcode.app/Contents/Developer
-~~~
-
 The project will use the macOS SDK, AppKit, WebKit, XCTest, XCUITest,
 Instruments, code signing, App Sandbox, and hardened-runtime tooling supplied by
 Xcode.
 
-### Required before creating the application target
-
-- Choose a product name.
-- Choose a local bundle identifier.
-- Choose the default search provider.
-- Confirm whether a private window belongs in the first usable release or the
-  later hardening phase.
-- Initialize Git and commit the approved planning documents.
+The repository is initialized on main, tracks origin/main, and contains the
+approved planning baseline.
 
 ### Dependency policy
 
@@ -148,8 +139,8 @@ baseline, after which an absolute budget may be adjusted once with evidence.
 | Browser-owned command response | p95 at or below 50 ms; no browser-owned main-thread stall above 100 ms |
 | Settled blank-browser CPU | below 1 percent average over 30 seconds |
 | Controlled scrolling | no browser-chrome hitch above 100 ms and no persistent frame degradation attributable to the application |
-| One settled blank tab, aggregate process footprint | provisional ceiling of 300 MB |
-| Ten settled deterministic lightweight tabs | provisional aggregate ceiling of 1 GB |
+| One settled blank tab, aggregate process footprint | provisional ceiling of 300 MiB |
+| Ten settled deterministic lightweight tabs | provisional aggregate ceiling of 1 GiB |
 | One hundred tab open/close cycles | no monotonic growth; settled footprint returns within 10 percent of the established baseline |
 | Cached rule-list startup overhead | does not delay interactive chrome; p95 attachment overhead below 50 ms |
 | Any established benchmark | no unexplained regression greater than 10 percent |
@@ -166,7 +157,7 @@ incremental-per-fixture-tab budget. The replacement must still be concrete.
   benchmark result.
 - There is no automatic result upload.
 
-## 5. Phase 0 — Approve architecture and contracts
+## 5. Phase 0 — Approve architecture and contracts (complete)
 
 ### Work
 
@@ -177,7 +168,9 @@ incremental-per-fixture-tab budget. The replacement must still be concrete.
   window scope.
 - Approve or revise the provisional performance budgets.
 - Select a small representative compatibility set from the sites the user
-  actually needs.
+  actually needs during the single-page and tabbed-browser pilot. Phase 0
+  defines the categories; exact sites are selected before Phase 5 blocking
+  acceptance rather than guessed before a usable browser exists.
 
 ### Deliverables
 
@@ -195,7 +188,10 @@ incremental-per-fixture-tab budget. The replacement must still be concrete.
 
 ### Stopping point
 
-Do not create the Xcode project until the user approves Phase 0.
+Phase 0 was approved on 2026-07-26. Production implementation may proceed under
+the recorded scope and gates. The later real-site smoke set will cover the
+user's actual login, documentation, shopping, banking, and media workflows;
+exact sites are selected from the Phase 2 through 4 pilot before Phase 5.
 
 ## 6. Phase 1 — Toolchain and WebKit risk validation
 
@@ -215,8 +211,10 @@ before building feature layers.
 5. Measure an unadorned window and one WKWebView.
 6. Validate an explicit persistent WKWebsiteDataStore shared by multiple web
    views.
-7. Prove cookie enumeration, value masking/reveal, individual deletion,
-   per-domain deletion, and clear-all behavior.
+7. Prove cookie metadata/value enumeration needed by the later masked UI,
+   individual deletion, per-domain deletion, cookie-only clear-all, and broader
+   website-data clear-all behavior. Mask/reveal presentation remains Phase 5 UI
+   work.
 8. Prove broader website-data enumeration and deletion.
 9. Compile, cache, attach, and remove a small WKContentRuleList.
 10. Test the intended per-site blocking exception and reload sequence.
@@ -233,12 +231,19 @@ product polish.
 - Local pages create local storage, IndexedDB, caches, and service workers where
   supported.
 - A known subresource is blocked and an ordinary first-party resource is not.
-- Multiple tabs observe the same normal-profile cookies.
+- Multiple simultaneous web views and a reconstructed profile observe the same
+  normal-profile cookies.
 - A new application launch observes the intended persistent data.
 - Deletion remains effective after reload and relaunch.
 - Startup, first-web-view, idle CPU, memory, and ten-view scaling benchmarks.
-- Repeated view creation and destruction with Instruments leak inspection.
-- Network Instruments trace of blank launch and settled idle time.
+- Privileged pktap capture with a positive attribution control for production
+  blank launch and at least 30 seconds of settled idle time.
+
+Repeated creation/destruction and leak inspection now belong to Phase 3's
+production TabController lifecycle and 100-cycle churn gate. Phase 1 measures
+one and ten resident views instead. Testing a disposable scaffold's artificial
+deallocation path would not validate the ownership and observer teardown that
+the real tab implementation introduces.
 
 ### Exit criteria
 
@@ -251,7 +256,10 @@ product polish.
 
 ### Stopping point
 
-Review the risk report and baseline before building the real browser shell.
+Phase 1 completed on 2026-07-26. The implementation, API probes, Release
+validation, performance gates, and privileged blank-network audit pass. The
+risk report records an unconditional WKWebView GO. Stop for checkpoint review
+before building the Phase 2 browser shell.
 
 ## 7. Phase 2 — Fast single-page browser
 
