@@ -79,10 +79,10 @@ final class BrowserNavigationUITests: XCTestCase {
         XCTAssertTrue(pageText("Phase 2 Page B").waitForExistence(timeout: 5))
     }
 
-    func testReloadRequestsThePageAgain() throws {
+    func testReloadRequestsThePageAgain() async throws {
         launchApplication()
         defer { application.terminate() }
-        try requestFixture("/phase2/reload-reset")
+        try await requestFixture("/phase2/reload-reset")
         navigate(to: "/phase2/reload-count")
         XCTAssertTrue(pageText("Reload count 1").waitForExistence(timeout: 5))
 
@@ -124,7 +124,7 @@ final class BrowserNavigationUITests: XCTestCase {
         )
     }
 
-    func testVisibleConnectionErrorCanRetry() throws {
+    func testVisibleConnectionErrorCanRetry() async throws {
         launchApplication()
         defer { application.terminate() }
         submit(Self.recoveryOrigin + "/recovered")
@@ -138,7 +138,7 @@ final class BrowserNavigationUITests: XCTestCase {
             "The connection error did not offer a retry action."
         )
 
-        try requestFixture("/phase2/recovery-enable")
+        try await requestFixture("/phase2/recovery-enable")
         errorReloadButton.click()
 
         XCTAssertTrue(
@@ -187,7 +187,10 @@ final class BrowserNavigationUITests: XCTestCase {
         XCTAssertTrue(pageText("Renamed Page A").waitForExistence(timeout: 3))
 
         application.terminate()
-        application.launchArguments = ["--ui-test-profile"]
+        application.launchArguments = [
+            "--ui-test-profile",
+            "--reset-ui-test-content-blocking",
+        ]
         application.launch()
         XCTAssertTrue(mainWindow.waitForExistence(timeout: 5))
         try assertAddressFieldIsFocused()
@@ -229,7 +232,10 @@ final class BrowserNavigationUITests: XCTestCase {
         waitForAddress(sentinelURL)
         application.terminate()
 
-        application.launchArguments = ["--ui-test-profile"]
+        application.launchArguments = [
+            "--ui-test-profile",
+            "--reset-ui-test-content-blocking",
+        ]
         application.launch()
         XCTAssertTrue(mainWindow.waitForExistence(timeout: 5))
         try assertAddressFieldIsFocused()
@@ -245,13 +251,156 @@ final class BrowserNavigationUITests: XCTestCase {
         )
     }
 
-    private func launchApplication(ignoringSavedState: Bool = true) {
+    func testPopupPolicyBlocksScriptedAndFormWindowsButRoutesDirectLinkInPlace() {
+        launchApplication()
+        defer { application.terminate() }
+        navigate(to: "/privacy/popup-policy")
+
+        XCTAssertTrue(
+            pageText("Popup Policy Fixture").waitForExistence(timeout: 5)
+        )
+        XCTAssertFalse(
+            pageText("Phase 2 Page B").waitForExistence(timeout: 1.5),
+            "A load-time, promise, or timer popup created a browsing surface."
+        )
+        waitForAddress(fixtureURL("/privacy/popup-policy"))
+        XCTAssertEqual(application.windows.count, 1)
+        XCTAssertEqual(application.webViews.count, 1)
+
+        application.buttons["Try Scripted Popup"].click()
+        XCTAssertFalse(
+            pageText("Phase 2 Page B").waitForExistence(timeout: 1),
+            "A user-activated window.open created a browsing surface."
+        )
+        waitForAddress(fixtureURL("/privacy/popup-policy"))
+        XCTAssertEqual(application.windows.count, 1)
+        XCTAssertEqual(application.webViews.count, 1)
+
+        application.buttons["Try Scripted Anchor"].click()
+        XCTAssertFalse(
+            pageText("Phase 2 Page B").waitForExistence(timeout: 1),
+            "A script-triggered anchor created or routed a browsing surface."
+        )
+        waitForAddress(fixtureURL("/privacy/popup-policy"))
+        XCTAssertEqual(application.windows.count, 1)
+        XCTAssertEqual(application.webViews.count, 1)
+
+        application.buttons["Try Targeted Form"].click()
+        XCTAssertFalse(
+            pageText("Phase 2 Page B").waitForExistence(timeout: 1),
+            "A target-blank form created a browsing surface."
+        )
+        waitForAddress(fixtureURL("/privacy/popup-policy"))
+        XCTAssertEqual(application.windows.count, 1)
+        XCTAssertEqual(application.webViews.count, 1)
+
+        application.links["Open Direct Link"].click()
+        XCTAssertTrue(pageText("Phase 2 Page B").waitForExistence(timeout: 5))
+        waitForAddress(fixtureURL("/phase2/page-b"))
+        XCTAssertEqual(
+            application.windows.count,
+            1,
+            "A direct target-blank link created a second browser window."
+        )
+        XCTAssertEqual(
+            application.webViews.count,
+            1,
+            "A direct target-blank link left a second WebView behind."
+        )
+    }
+
+    func testAdAndTrackerBlockingSupportsAnExactHostExceptionAndReload() async throws {
+        launchApplication()
+        defer { application.terminate() }
+        try await requestFixture("/reset")
+        navigate(to: "/privacy/blocking/")
+
+        XCTAssertTrue(
+            pageText("First-party resource loaded").waitForExistence(timeout: 5),
+            "Blocking prevented the allowed first-party fixture resource."
+        )
+        XCTAssertTrue(
+            pageText("Blocking fixture complete").waitForExistence(timeout: 5),
+            "The blocking fixture did not finish parsing."
+        )
+        XCTAssertTrue(
+            pageText("Ad resource blocked").waitForExistence(timeout: 5),
+            "The deterministic advertising resource was not blocked."
+        )
+        var requestCounts = try await fixtureRequestCounts()
+        XCTAssertEqual(requestCounts["/privacy/allowed.js"], 1)
+        XCTAssertNil(
+            requestCounts["/privacy/blocked.js"],
+            "WebKit requested the resource that the blocker should stop."
+        )
+
+        application.typeKey("p", modifierFlags: [.command, .option])
+        XCTAssertTrue(
+            pageText("Ad resource loaded").waitForExistence(timeout: 5),
+            "Disabling blocking for the current host did not reload unblocked."
+        )
+        requestCounts = try await fixtureRequestCounts()
+        XCTAssertEqual(requestCounts["/privacy/allowed.js"], 2)
+        XCTAssertEqual(requestCounts["/privacy/blocked.js"], 1)
+
+        let localhostURL = "http://localhost:18765/privacy/blocking/"
+        submit(localhostURL)
+        waitForAddress(localhostURL)
+        XCTAssertTrue(
+            pageText("Blocking fixture complete").waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            pageText("Ad resource blocked").waitForExistence(timeout: 5),
+            "An exception for 127.0.0.1 leaked to the distinct localhost host."
+        )
+        requestCounts = try await fixtureRequestCounts()
+        XCTAssertEqual(requestCounts["/privacy/allowed.js"], 3)
+        XCTAssertEqual(
+            requestCounts["/privacy/blocked.js"],
+            1,
+            "The distinct localhost host inherited the 127.0.0.1 exception."
+        )
+
+        application.terminate()
+        launchApplication(resetContentBlocking: false)
+        navigate(to: "/privacy/blocking/")
+        XCTAssertTrue(
+            pageText("Ad resource loaded").waitForExistence(timeout: 5),
+            "The explicit host exception did not survive relaunch."
+        )
+        requestCounts = try await fixtureRequestCounts()
+        XCTAssertEqual(requestCounts["/privacy/allowed.js"], 4)
+        XCTAssertEqual(requestCounts["/privacy/blocked.js"], 2)
+
+        application.typeKey("p", modifierFlags: [.command, .option])
+        XCTAssertTrue(
+            pageText("Ad resource blocked").waitForExistence(timeout: 5),
+            "Re-enabling blocking did not reload with protection attached."
+        )
+        requestCounts = try await fixtureRequestCounts()
+        XCTAssertEqual(requestCounts["/privacy/allowed.js"], 5)
+        XCTAssertEqual(
+            requestCounts["/privacy/blocked.js"],
+            2,
+            "Re-enabling blocking still requested the blocked resource."
+        )
+    }
+
+    private func launchApplication(
+        ignoringSavedState: Bool = true,
+        resetContentBlocking: Bool = true
+    ) {
         continueAfterFailure = false
         application = XCUIApplication()
         application.launchArguments = [
             "--ui-test-profile",
             "--reset-ui-test-bookmarks",
         ]
+        if resetContentBlocking {
+            application.launchArguments.append(
+                "--reset-ui-test-content-blocking"
+            )
+        }
         if ignoringSavedState {
             application.launchArguments += [
                 "-ApplePersistenceIgnoreState",
@@ -390,8 +539,15 @@ final class BrowserNavigationUITests: XCTestCase {
         application.typeKey("l", modifierFlags: .command)
         let field = addressField
         XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.click()
         field.typeKey("a", modifierFlags: .command)
+        field.typeKey(.delete, modifierFlags: [])
         field.typeText(text)
+        XCTAssertEqual(
+            field.value as? String,
+            text,
+            "Address-field input was contaminated before submission."
+        )
         field.typeKey(.return, modifierFlags: [])
     }
 
@@ -501,8 +657,16 @@ final class BrowserNavigationUITests: XCTestCase {
     }
 
     @discardableResult
-    private func requestFixture(_ path: String) throws -> Data {
+    private func requestFixture(_ path: String) async throws -> Data {
         let url = try XCTUnwrap(URL(string: fixtureURL(path)))
-        return try Data(contentsOf: url)
+        return try await URLSession.shared.data(from: url).0
+    }
+
+    private func fixtureRequestCounts() async throws -> [String: Int] {
+        let data = try await requestFixture("/stats")
+        return try JSONDecoder().decode(
+            [String: Int].self,
+            from: data
+        )
     }
 }

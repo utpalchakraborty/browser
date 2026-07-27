@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 nonisolated enum NavigationPolicyDecision: Equatable, Sendable {
@@ -32,5 +33,31 @@ nonisolated enum NavigationPolicy {
         }
 
         return .cancel
+    }
+}
+
+nonisolated enum NewContextNavigationPolicy {
+    static func shouldRouteInCurrentPage(
+        url: URL?,
+        isLinkActivation: Bool,
+        buttonNumber: Int,
+        modifierFlags: NSEvent.ModifierFlags
+    ) -> Bool {
+        guard
+            isLinkActivation,
+            buttonNumber == 1,
+            modifierFlags.intersection([
+                .command,
+                .control,
+                .option,
+                .shift,
+            ]).isEmpty,
+            let scheme = url?.scheme?.lowercased(),
+            ["http", "https"].contains(scheme)
+        else {
+            return false
+        }
+
+        return true
     }
 }

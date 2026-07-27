@@ -1,7 +1,9 @@
 # Performance Baseline
 
-Status: Phase 1 historical baseline retained; Phase 2 baseline locked; Phase 3 interaction and bookmark gates pass; launch rerun pending
-Last updated: 2026-07-26
+Status: Phase 1 historical baseline retained; Phase 2 baseline locked; Phase 3
+interaction/bookmark gates and the Phase 4 production-blocker microbenchmark
+pass; clean full-app launch/resource reruns remain pending
+Last updated: 2026-07-27
 
 ## Environment
 
@@ -196,8 +198,35 @@ then measured cached lookup, attachment, and removal.
 | Synchronous removal | 500 | 0.000042 ms | 0.000042 ms | 0.000209 ms |
 
 Cached attachment passes the p95 below 50 ms gate by a wide margin. Large
-production-list conversion and compilation remain Phase 5 work and never enter
-normal launch.
+production-list conversion and first-install compilation were intentionally
+deferred from this Phase 1 baseline to Phase 4.
+
+## Phase 4 production content-rule checkpoint
+
+Command: `make blocker-benchmark`
+
+The Release-optimized production benchmark resolves both pinned compiled rule
+lists—119,512 total rules—from `WKContentRuleListStore`, then measures lookup,
+attachment, and removal without reading bundled JSON.
+
+| Operation | Samples | Median | p95 | Maximum |
+| --- | ---: | ---: | ---: | ---: |
+| Two-list cached lookup | 100 | 0.185708 ms | 0.216417 ms | 0.246542 ms |
+| Two-list synchronous attachment | 500 | 0.000167 ms | 0.000250 ms | 0.000375 ms |
+| Two-list synchronous removal | 500 | 0.000125 ms | 0.000125 ms | 0.000208 ms |
+
+Artifact: `.build/ContentBlockerBenchmark.BjTFAk`.
+
+The isolated Release production-package test also forced a cold compile of
+both bundled lists in 4,160.4 ms. A prior cold run measured 6,714.4 ms, so the
+first-install expectation is currently roughly 4 to 7 seconds. This work runs
+only when immutable identifiers miss the local WebKit cache; cached launch
+performs neither JSON loading nor compilation. The native window is already
+interactive, but protected remote navigation waits for preparation.
+
+This focused benchmark does not replace a fresh full-app cached-launch run,
+one/ten-view memory probes, or idle-CPU measurement with production blocking
+active. Those broader Phase 4 gates remain pending on a clean desktop.
 
 ## Locked budgets
 

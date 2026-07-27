@@ -1,8 +1,9 @@
 # Browser Architecture
 
-Status: Approved; current implementation through Phase 3, tabs planned for
-Phase 4
-Last updated: 2026-07-26
+Status: Approved; the first Phase 4 ad/tracker-blocking and popup-suppression
+checkpoint is complete; website-data privacy controls remain Phase 4; tabs
+remain Phase 5
+Last updated: 2026-07-27
 
 ## 1. Purpose
 
@@ -63,13 +64,14 @@ The initial product must:
 
 - A native browser window and address field.
 - Back, forward, reload, stop, and loading status.
-- Multiple tabs with familiar keyboard shortcuts.
 - Bookmarks with add, edit, delete, search, and open operations.
 - A normal persistent WebKit profile.
+- Compiled ad and tracker blocking.
 - Cookie inspection and individual, per-site, and global deletion.
 - Visibility into other website-data categories and per-site/global deletion.
-- Compiled ad and tracker blocking.
 - A visible per-site blocking exception.
+- Strict popup suppression independent of content-blocking rules.
+- Multiple tabs with familiar keyboard shortcuts.
 - Safe handling of common browser cases needed for daily use.
 - Local-only performance measurements and regression tests.
 
@@ -111,8 +113,15 @@ flowchart TD
     Coordinator --> Repository
     Repository --> Files[Versioned JSON and backup]
 
-    Window -. Phase 4 .-> Tabs[TabManager]
-    Tabs -. Phase 4 .-> Tab[TabController per resident tab]
+    App --> Blocking[ContentBlockingCoordinator]
+    Blocking --> Resolver[Bundle + resolver + last-valid state]
+    Blocking --> SitePolicy[Exact-host policy store]
+    Resolver --> RuleStore[WKContentRuleListStore]
+    Window --> Blocking
+
+    Profile -. Remaining Phase 4 .-> PrivacyUI[Website-data controls]
+    Window -. Phase 5 .-> Tabs[TabManager]
+    Tabs -. Phase 5 .-> Tab[TabController per resident tab]
 ~~~
 
 The important boundary is between browser-owned behavior and WebKit-owned
@@ -132,8 +141,9 @@ behavior:
 
 AppDelegate owns process lifecycle, creates windows, installs application menus,
 disables AppKit state restoration so macOS cannot reconstruct browser windows,
-web content, or tab URLs, and creates the production BookmarkRepository after
-the native window has been presented.
+web content, or tab URLs, creates the production BookmarkRepository after the
+native window has been presented, and prepares the production
+ContentBlockingCoordinator after native chrome is interactive.
 
 BrowserWindowController owns one browser window, including:
 
@@ -141,10 +151,16 @@ BrowserWindowController owns one browser window, including:
 - the current single-page WKWebView container;
 - keyboard focus and command routing;
 - configuration of native frame autosave for the main window; and
-- bookmark-button state and presentation of the bookmark editor and manager.
+- bookmark-button state and presentation of the bookmark editor and manager;
+- strengthening blocker policy before ordinary navigation, relaxing exact-host
+  policy only after the winning commit, and ignoring stale callbacks;
+- applying a user-requested current-site exception before its explicit reload
+  so document-level matches remain recoverable; and
+- Privacy-menu status, exception toggling, explicit reload, and visible
+  unavailable presentation.
 
 There is no global navigation singleton. Phase 3 routes commands to the current
-page in the key browser window; Phase 4 will route the same semantic commands
+page in the key browser window; Phase 5 will route the same semantic commands
 to the selected tab.
 
 ### Profile layer
@@ -152,14 +168,21 @@ to the selected tab.
 BrowserProfile is the composition root for WebKit profile-scoped services:
 
 - a stable persistent WKWebsiteDataStore;
-- WebViewFactory;
-- future WebsiteDataController and ContentBlockerService instances; and
-- future site-policy state.
+- WebViewFactory.
 
 Bookmarks are application-owned data rather than WebKit profile data.
 AppDelegate constructs BookmarkRepository separately and injects it into the
 window controller, which exposes only immutable snapshots through a main-actor
 BookmarkCoordinator.
+
+Blocking policy is also browser-owned rather than part of BrowserProfile.
+AppDelegate composes ContentBlockerBundle, ContentBlockerRuleSetResolver,
+ContentBlockerService, ContentBlockerStateStore, and
+ContentBlockerSitePolicyStore behind one main-actor ContentBlockingCoordinator.
+The coordinator prepares one complete rule set and applies its lists to each
+WKWebView's WKUserContentController according to the current exact-host policy.
+WebsiteDataController operates against BrowserProfile's data store; its user
+interface remains the next Phase 4 slice.
 
 The normal profile is intentionally persistent because the user wants cookies
 that survive relaunch and can be inspected. A future private window would use a
@@ -168,7 +191,7 @@ normal profile.
 
 ### Tab layer
 
-Phase 4 introduces this layer. TabManager will own the ordered tab collection,
+Phase 5 introduces this layer. TabManager will own the ordered tab collection,
 selected tab identifier, creation,
 closure, reordering, and routing of popup/new-window requests.
 
@@ -245,7 +268,7 @@ creation/update timestamps.
   toolbar, editor sheet, and searchable nonmodal manager.
 - The toolbar star and Command-D add or edit the current page;
   Option-Command-B opens the manager. Opening a bookmark replaces the current
-  page until Phase 4 routes it to the selected tab.
+  page until Phase 5 routes it to the selected tab.
 
 Phase 3 deliberately has no persistent bookmarks bar and no folder hierarchy.
 The searchable manager and keyboard commands keep the browsing surface compact;
@@ -285,31 +308,43 @@ the correct mechanism for avoiding persistent website data.
 
 ### Content blocking
 
-ContentBlockerService:
+ContentBlockerBundle validates the bundled manifest, resource names, immutable
+identifiers, and hashes. ContentBlockerRuleSetResolver looks up every compiled
+identifier first, loads and hashes JSON off the main actor only on cache miss,
+asks ContentBlockerService to use WebKit's asynchronous compile API, and records
+a complete current set only after every list succeeds. ContentBlockerStateStore
+persists only last-valid identifiers. ContentBlockingCoordinator owns readiness,
+exact-host policy, transactional fallback, and per-WKUserContentController
+attachment state.
 
-- loads an already-compiled rule list during startup;
-- compiles only when installing or changing a blocker source;
-- performs source parsing and preparation away from the main actor;
-- atomically keeps the last valid compiled rules if an update fails; and
-- applies rules through WKUserContentController.
+For a resident web view, policy application is strengthen-only while ordinary
+navigation is pending. An exact-host relaxation occurs only after the winning
+document commits, and stale, overlapping, or post-commit callbacks cannot
+weaken the committed or newer page. The explicit current-site switch is a
+deliberate exception: its chosen policy is applied before reload so even a
+document-level rule match can be recovered.
 
-The first release will use pinned AdGuard Base and Tracking Protection filter
-sources. A pinned release of AdGuard Safari Converter will run only as a
-developer-side command-line tool; it is never linked into or shipped with the
-browser. Source and converter are GPL-3.0, which is acceptable for this
-personal-use project but must be re-audited before any distribution. Generated
-rules record source and tool hashes, conversion counts, attribution, and
-licenses. Normal launch never downloads or converts a list.
+The current production package uses pinned AdGuard Base and Tracking Protection
+filter sources. Pinned AdGuard Safari Converter 4.3.0 ran only as a developer-
+side command-line tool; it is not linked into or shipped with the browser.
+Source and converter are GPL-3.0, which is acceptable for this personal-use
+project but must be re-audited before any distribution. The bundled manifest
+records exact source and converter commits, input and output hashes, conversion
+arguments, output rule counts, attribution, and licenses. Normal launch never
+downloads or converts a list.
 
 Phase 1 proved WKContentRuleList rule ordering, cached attachment cost, and a
-live exception on/off sequence that replaces the attached list and explicitly
-reloads an already-loaded fixture page. Phase 5 pins the exact inputs and must
-validate production-list conversion, unsupported rules, cold compile time,
-size, false positives, persistent exception state, UI feedback, and the
-real-site smoke set before bundling the output. Updates remain manual and
-release-bound; there is no automatic filter network request. Blocking failures
-must not silently prevent all browsing; the last valid rules remain active and
-the user gets a visible status.
+live exception sequence. The first Phase 4 checkpoint now bundles 119,512
+generated rules under immutable content-addressed identifiers, validates the
+manifest and hashes, compiles only on cache miss, persists an exact-host
+exception, and exposes active, last-valid, preparing, disabled-host, and
+unavailable states. Updates remain manual and release-bound; there is no
+automatic filter network request. A package change becomes active only as a
+complete set. If compilation fails, the complete last-valid set remains active;
+if no valid set exists, remote navigation is held behind a visible fail-closed
+state. Post-fix Debug and Release unit and UI suites, the production benchmark,
+and Release-package verification are green. On 2026-07-27, the user reported
+that the blocker and popup checkpoint works in hands-on use and approved it.
 
 The browser will not proxy traffic or run arbitrary filter code for each
 request.
@@ -321,12 +356,14 @@ request.
 | Data | Owner | Purpose | User deletion |
 | --- | --- | --- | --- |
 | Bookmarks | BookmarkRepository | Explicitly saved pages | Delete individually; reset active files; remove active and preserved corrupt files while Browser is quit for complete erasure |
-| Required preferences | UserDefaults | Search provider and blocker enabled state | Reset settings |
+| Required preferences | UserDefaults | Search provider | Reset settings |
 | Main window frame | UserDefaults through AppKit frame autosave | Reopen at the last usable size and location | Reset settings |
-| Per-site blocker exceptions | SitePolicyStore | Explicit user choices | Remove individually or reset exceptions |
-| Cookies | WKWebsiteDataStore | Login and website behavior | Cookie item, domain, or clear-all controls |
-| Caches and other site data | WKWebsiteDataStore | Performance and website functionality | Domain or clear-all controls |
-| Compiled blocker data and source metadata | WKContentRuleListStore and app support | Fast local blocking | Reset/reinstall blocker |
+| Last-valid blocker identifiers | ContentBlockerStateStore in UserDefaults | Transactional recovery bookkeeping; contains no navigated URL | Reset UI remains Phase 4 work |
+| Per-site blocker exceptions | ContentBlockerSitePolicyStore in UserDefaults | Explicit exact-host user choices | Toggle current host; reset-all UI remains Phase 4 work |
+| Cookies | WKWebsiteDataStore | Login and website behavior | Underlying deletion proven; Phase 4 privacy UI pending |
+| Caches and other site data | WKWebsiteDataStore | Performance and website functionality | Underlying deletion proven; Phase 4 privacy UI pending |
+| Compiled blocker data | WKContentRuleListStore | Fast local blocking | Reset UI remains Phase 4 work |
+| Blocker manifest, rules, notices, and license | Signed app-bundle resources | Pinned local protection and provenance | Replace or remove the app |
 
 No application-owned file may contain a passive list of navigated URLs.
 
@@ -371,9 +408,10 @@ can provide a stronger no-persistence mode.
 - No analytics SDK, telemetry endpoint, remote crash reporter, advertising
   identifier, or application-operated web service.
 - Code owned by the application initiates no network request on a blank launch.
-  Only user navigation and an explicit future blocker update may initiate
-  app-intended network activity. Operating-system and WebKit behavior is
-  measured and reported separately rather than silently attributed to the app.
+  Only user navigation initiates app-intended network activity in the current
+  build. Any future explicit blocker updater requires a separate decision.
+  Operating-system and WebKit behavior is measured and reported separately
+  rather than silently attributed to the app.
 - Release logging never records URLs, query strings, search terms, cookie
   values, page content, form values, or bookmark contents.
 - Performance signposts use opaque tab identifiers, never URLs.
@@ -386,8 +424,21 @@ can provide a stronger no-persistence mode.
   errors or opts into deprecated TLS.
 - HTTP and HTTPS are accepted. Other URL schemes are denied or explicitly
   handed to macOS under a small, tested allowlist and visible user action.
-- Popups become tabs only under an explicit policy, normally requiring user
-  activation.
+- No page may create a secondary app window, another WKWebView, a background
+  tab, or a tab-under. Scripted `window.open` requests and forms targeting a new
+  browsing context are denied, including requests triggered by page script in
+  response to a click.
+- Only a direct pointer-activated HTTP or HTTPS anchor targeting a new browsing
+  context may be routed. WebKit exposes a nonzero mouse-button value for that
+  action; JavaScript `anchor.click()` reports `linkActivated` but no mouse
+  button and is denied. Keyboard/synthetic target-blank activation is also
+  denied because public API does not prove a direct pointer gesture. The
+  allowed pointer action replaces the current page and may become a new
+  foreground tab only after Phase 5; it never becomes a background tab or
+  separate app window.
+- Ad/tracker blocking may prevent common advertising popup triggers and
+  overlays before they execute, but delegate-level popup denial is an
+  independent backstop and never depends on a filter-list match.
 - No page-injected JavaScript bridge exists in the first release. If a later
   feature truly requires one, it must use an isolated content world, a narrow
   message schema, and a separate security review.
@@ -417,8 +468,10 @@ CNAME cloaking, or a newly introduced tracker.
   preparation use structured concurrency.
 - Observe WebKit state changes rather than polling.
 - Reuse resident tab web views when switching.
-- Load compiled blocker artifacts by identifier; never compile a large list on
-  normal launch.
+- Load compiled blocker artifacts by identifier. Never compile a large list on
+  an ordinary cached launch; treat first-install or changed-bundle compilation
+  as a measured setup path and do not allow an unprotected remote navigation
+  while it is pending.
 - Keep the initial view hierarchy and visual effects simple.
 - Do not fetch favicons, previews, suggestions, or remote start-page content in
   the first release.
@@ -512,7 +565,9 @@ dependency-injection infrastructure.
 - Navigation, external-scheme, and popup policy.
 - Bookmark encoding, atomic replacement, recovery, and migrations.
 - Privacy-default configuration.
-- Blocker conversion and validation if a converter is introduced.
+- Blocker manifest/hash validation, cache/fallback state, exact-host policy,
+  production-list compilation, and attachment behavior. The pinned converter
+  remains an offline developer tool rather than runtime code.
 
 ### WebKit integration and UI tests
 
@@ -625,11 +680,16 @@ Approved defaults:
 
 Phase 1 established:
 
-1. AdGuard Base and Tracking Protection as the planned filter sources, with a
-   pinned AdGuard Safari Converter command-line conversion in Phase 5;
+1. AdGuard Base and Tracking Protection as the selected filter sources, with a
+   pinned AdGuard Safari Converter command-line conversion in Phase 4;
 2. manual, release-bound filter updates with no silent network request; and
 3. locked absolute CPU, memory, launch, and cached-rule attachment budgets in
    [performance-baseline.md](performance-baseline.md).
+
+The completed first Phase 4 checkpoint converted and bundled those pinned
+sources, verified their hashes and production semantics, and implemented the
+exact-host exception plus popup backstop. Website-data UI, global blocker reset
+controls, and full Phase 4 resource and network gates remain.
 
 The measured WebKit API and platform risk decision is recorded in
 [phase-1-risk-report.md](phase-1-risk-report.md).

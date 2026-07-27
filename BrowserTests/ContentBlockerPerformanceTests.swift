@@ -10,6 +10,85 @@ final class ContentBlockerPerformanceTests: XCTestCase {
     private static let attachmentSampleCount = 500
     private static let attachmentP95LimitMilliseconds = 50.0
 
+    func testProductionCachedLookupAndSynchronousAttachmentPerformance() async throws {
+        let package = try ContentBlockerBundle.loadProductionPackage()
+        let expectedIdentifiers = package.ruleSources.map(\.identifier)
+        let ruleStoreDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "BrowserProductionBlockerBenchmark.\(UUID().uuidString)",
+                isDirectory: true
+            )
+        let ruleStore = try XCTUnwrap(
+            WKContentRuleListStore(url: ruleStoreDirectory)
+        )
+        let defaultsSuiteName =
+            "BrowserProductionBlockerBenchmark.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(
+            UserDefaults(suiteName: defaultsSuiteName)
+        )
+        defer {
+            defaults.removePersistentDomain(forName: defaultsSuiteName)
+            try? FileManager.default.removeItem(at: ruleStoreDirectory)
+        }
+
+        let service = ContentBlockerService(ruleStore: ruleStore)
+        let prepared = try await ContentBlockerRuleSetResolver(
+            service: service,
+            stateStore: ContentBlockerStateStore(defaults: defaults)
+        ).prepare(currentSources: package.ruleSources)
+        XCTAssertEqual(prepared.identifiers, expectedIdentifiers)
+
+        var lookupDurations = [Double]()
+        lookupDurations.reserveCapacity(Self.lookupSampleCount)
+        var cachedRuleLists = prepared.ruleLists
+        for _ in 0..<Self.lookupSampleCount {
+            let start = DispatchTime.now().uptimeNanoseconds
+            cachedRuleLists.removeAll(keepingCapacity: true)
+            for identifier in expectedIdentifiers {
+                let cached = try await service.cachedRuleList(
+                    identifier: identifier
+                )
+                cachedRuleLists.append(try XCTUnwrap(cached))
+            }
+            lookupDurations.append(milliseconds(since: start))
+        }
+
+        let contentController = WKUserContentController()
+        for _ in 0..<10 {
+            cachedRuleLists.forEach { contentController.add($0) }
+            cachedRuleLists.forEach { contentController.remove($0) }
+        }
+
+        var attachmentDurations = [Double]()
+        attachmentDurations.reserveCapacity(Self.attachmentSampleCount)
+        var removalDurations = [Double]()
+        removalDurations.reserveCapacity(Self.attachmentSampleCount)
+        for _ in 0..<Self.attachmentSampleCount {
+            var start = DispatchTime.now().uptimeNanoseconds
+            cachedRuleLists.forEach { contentController.add($0) }
+            attachmentDurations.append(milliseconds(since: start))
+
+            start = DispatchTime.now().uptimeNanoseconds
+            cachedRuleLists.forEach { contentController.remove($0) }
+            removalDurations.append(milliseconds(since: start))
+        }
+
+        let report = BlockerBenchmarkReport(
+            lookup: .init(samples: lookupDurations),
+            attachment: .init(samples: attachmentDurations),
+            removal: .init(samples: removalDurations),
+            attachmentP95LimitMilliseconds:
+                Self.attachmentP95LimitMilliseconds
+        )
+        print("BROWSER_BLOCKER_BENCHMARK=\(try report.encodedJSON())")
+
+        XCTAssertLessThan(
+            report.attachment.p95Milliseconds,
+            Self.attachmentP95LimitMilliseconds,
+            "Production content-rule attachment exceeded the Phase 4 p95 gate"
+        )
+    }
+
     func testCachedLookupAndSynchronousAttachmentPerformance() async throws {
         let rules = try ContentBlockerService.probeRules(
             blockedURLFilter: ".*/benchmark-blocked[.]js",

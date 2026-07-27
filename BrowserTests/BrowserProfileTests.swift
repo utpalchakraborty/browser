@@ -21,6 +21,10 @@ final class BrowserProfileTests: XCTestCase {
             firstWebView.configuration.websiteDataStore.identifier,
             identifier
         )
+        XCTAssertFalse(
+            firstWebView.configuration.preferences
+                .javaScriptCanOpenWindowsAutomatically
+        )
     }
 
     func testHostedUnitTestsUseAnIsolatedProfile() {

@@ -1,19 +1,28 @@
 # Project Status
 
-Last updated: 2026-07-26
+Last updated: 2026-07-27
 
 ## Current phase
 
-Phase 3 — bookmarks are implemented and the Debug and Release functional
-suites pass. The user approved the normal live bookmark workflow; the manual
-recovery exercise and a clean idle-desktop launch-performance rerun remain
-pending, so the complete Phase 3 gate is not yet closed. Tabs remain Phase 4
-work.
+Phase 4 — the first ad/tracker-blocking and popup-suppression checkpoint is
+complete and approved. Pinned production rules are enabled by default, an
+exact-host compatibility exception is available from the Privacy menu, and the
+browser-level popup backstop is covered independently of filter matches.
+Website-data privacy controls are the next Phase 4 slice. Tabs remain Phase 5.
+
+The Phase 3 manual bookmark-recovery exercise and clean idle-desktop launch-
+performance rerun are still pending. Post-fix Debug and Release unit and UI
+verification, the production-list benchmark, and production Release bundle
+verification are green. The navigation-boundary privacy race described below
+is resolved. On 2026-07-27, the user reported that the Phase 4 blocker and popup
+checkpoint works in hands-on use and approved it.
 
 The browser is now a usable native single-page pilot. It accepts HTTP and HTTPS
 URLs, infers HTTPS for plausible hosts, searches plain text, exposes WebKit
-navigation state through responsive AppKit controls, and persists only pages
-the user explicitly bookmarks. The Phase 1 WKWebView GO decision remains
+navigation state through responsive AppKit controls, and creates no passive
+visit history. Application-owned persistence is limited to explicit bookmarks,
+required preferences and window geometry, exact-host blocker exceptions, and
+last-valid blocker identifiers. The Phase 1 WKWebView GO decision remains
 unchanged.
 
 ## Phase 3 implemented
@@ -22,7 +31,7 @@ unchanged.
   bookmark. Option-Command-B opens a nonmodal, searchable Bookmarks manager.
 - Add, edit, delete, title/URL search, duplicate handling, relaunch persistence,
   and open-in-current-page workflows are implemented. Tabs remain deliberately
-  absent until Phase 4.
+  absent until Phase 5.
 - The bookmark library is intentionally a flat, keyboard-first searchable
   manager with no persistent bookmarks bar. The user approved this cleaner
   workflow; folder hierarchy is deferred until real use demonstrates a need.
@@ -83,6 +92,70 @@ The user approved the production add/edit/search/open/delete, keyboard-command,
 and relaunch-persistence workflow on 2026-07-26. One manual
 backup/recovery/reset scenario and a clean launch-performance rerun remain
 pending.
+
+## Phase 4 blocker checkpoint complete
+
+- Production ships pinned AdGuard Base and Tracking Protection WebKit rule
+  lists: 36,356 and 83,156 rules, respectively, for 119,512 total. The source
+  registry commit is `1429043fe73b7a16577966ff04afa7e5ba630925`; conversion
+  used pinned Safari Converter 4.3.0. Exact source, converter, input, output,
+  license, and attribution data is bundled with the app.
+- Blocking is enabled by default. Browser performs no filter download or
+  automatic update request. Updates are manual and release-bound.
+- A normal cached launch resolves the immutable compiled identifiers without
+  loading the 15,149,980 bytes of JSON. A first install or changed bundle hashes
+  and loads the JSON away from the main actor, then uses WebKit's asynchronous
+  compiler. The latest Release cold compile measured 4,160.4 ms; observed cold
+  runs are roughly 4 to 7 seconds.
+- The native window and focused address field appear before preparation.
+  Remote navigation is queued until protected rules are ready. A changed rule
+  package activates transactionally; a failure retains the complete last-valid
+  set, and no available set produces a visible fail-closed state.
+- Privacy displays `Active`, `Active (Last Valid Rules)`, `Preparing`, an exact-
+  host disabled state, or `Unavailable`. Option-Command-P toggles a persistent
+  exception for the current exact HTTP(S) host and explicitly reloads. The
+  exception does not inherit to subdomains, alternate names such as
+  `localhost`, or unrelated hosts.
+- Popup denial remains a separate browser-level invariant. Load-time, promise,
+  timer, click-handler, scripted-anchor, and target-blank-form paths are denied
+  without creating another app window or WKWebView. A directly clicked HTTP(S)
+  anchor may route deliberately into the existing page. Denied or failed
+  navigation restores the blocker policy of the committed page.
+- An ordinary pending navigation may only strengthen the resident content policy. An
+  exact-host relaxation is applied only after the winning document commits;
+  stale, overlapping, and post-commit callbacks cannot weaken the committed or
+  newer page. The explicit current-site switch applies its chosen policy before
+  reload so a document-level match cannot make the recovery control ineffective.
+
+Debug unit verification passed 117 of 117 tests. Release unit verification also
+passed 117 of 117 tests, including compiling and attaching the actual production
+lists, proving an ordinary local resource loads, proving a production-matched
+ad resource is never requested, and proving list removal restores it. The
+navigation suite covers a slow protected-to-excepted transition, an overlapping
+replacement navigation, stale commits and failures, post-commit and unbound
+callback ordering, and fragment navigations that emit only an action callback.
+Artifacts: `.build/TestResults.VlB318/Browser.xcresult` and
+`.build/TestResults.JJXn94/Browser.xcresult`.
+
+The pre-commit navigation-boundary blocker is resolved. Policy application is
+strengthen-only while an ordinary navigation is pending, exact relaxation is
+reserved for the winning commit, and stale or overlapping callbacks leave the
+resident policy unchanged. The deliberate current-site switch is applied
+before its explicit reload, including for a document-blocking rule. The
+deterministic regressions above exercise both the live WebKit boundary and the
+navigation-state ordering model.
+
+The dedicated production-list benchmark passed with cached lookup p95
+0.216417 ms, synchronous attachment p95 0.000250 ms, and removal p95
+0.000125 ms. Artifact: `.build/ContentBlockerBenchmark.BjTFAk`. The packaged
+Release app passed arm64, signature, App Sandbox, hardened-runtime, entitlement,
+and independently pinned blocker-resource checks.
+
+The expanded UI suite now checks blocked-request counts, exception persistence,
+exact-host isolation, re-enabling, scripted-anchor denial, and unchanged app-
+window and WKWebView counts. Debug and Release each passed all 11 tests.
+Artifacts: `.build/TestResults.UqqvcE/Browser.xcresult` and
+`.build/TestResults.LgnTdT/Browser.xcresult`.
 
 ## Phase 2 delivered
 
@@ -168,20 +241,32 @@ evidence is desired.
 ## Current limitations
 
 There is one page and one window. Opening a bookmark replaces the current page.
-Tabs, privacy-management UI, downloads, production filter lists, and private
-windows remain later phases.
-Programmatic popups are suppressed; a user-activated new-window link replaces
-the current page until Phase 4 adds tabs.
+Production ad/tracker rules are active. The website-data privacy-management UI
+remains Phase 4; tabs are Phase 5. Downloads and private windows remain later
+work.
+
+Programmatic popups are suppressed, and the roadmap now makes that behavior an
+explicit invariant: no page-created secondary app window, WKWebView, background
+tab, or tab-under is permitted. Scripted `window.open` and forms targeting a new
+context are denied. Only a direct pointer click on an HTTP or HTTPS anchor
+targeting a new context may route anywhere; it replaces the current page now
+and will open a foreground tab in Phase 5. Ad/tracker blocking often stops
+popup scripts and advertising overlays before they run, but popup denial is a
+separate backstop that does not depend on a filter match.
 
 DNS and TLS presentations have deterministic unit coverage; the end-to-end UI
 retry scenario uses a refused localhost connection. Representative real-site
-compatibility remains part of the hands-on checkpoint rather than a stable
+compatibility remains a hands-on regression check rather than a stable
 automated gate.
 
 ## Next action
 
-Back up the bookmark files, force one recovery, and test Restore Backup or
-Reset Bookmarks. Then rerun the launch-performance gate on an idle desktop and
-review the Phase 3 checkpoint before starting Phase 4 tabs. Revisit bookmark
-folders only if ordinary use shows that the flat searchable manager is
-insufficient.
+Implement the website-data privacy window as the next Phase 4 slice, including
+cookie/site-data deletion plus reset controls for all blocker exceptions and
+compiled blocker artifacts. A fresh blank-network and container audit and the
+full launch/resource performance gates remain Phase 4 acceptance work.
+
+Separately, back up the bookmark files, force one recovery, test Restore Backup
+or Reset Bookmarks, and rerun the launch-performance gate on an idle desktop.
+Tabs follow in Phase 5. Revisit bookmark folders only if ordinary use shows
+that the flat searchable manager is insufficient.

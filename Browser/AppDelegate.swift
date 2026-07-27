@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     )
     private var browserWindowController: BrowserWindowController?
+    private var contentBlockingCoordinator: ContentBlockingCoordinator?
 #if DEBUG
     private var profilePersistenceProbe: ProfilePersistenceProbe?
 #endif
@@ -41,6 +42,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.disableRelaunchOnLogin()
 
+        let contentBlockingCoordinator = Self.makeContentBlockingCoordinator(
+            arguments: CommandLine.arguments
+        )
+        self.contentBlockingCoordinator = contentBlockingCoordinator
+
         let presentationState = BrowserPerformanceSignposts.signposter.beginInterval(
             "InitialWindowPresentation"
         )
@@ -48,7 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             searchProvider: BrowserPreferences.searchProvider(),
             frameAutosaveName: Self.windowFrameAutosaveName(
                 arguments: CommandLine.arguments
-            )
+            ),
+            contentBlockingCoordinator: contentBlockingCoordinator
         )
         browserWindowController = controller
         installMainMenu(navigationTarget: controller)
@@ -104,7 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(
             deadline: .now()
                 + .milliseconds(Self.initialWebViewDeferralMilliseconds)
-        ) { [weak self, weak controller] in
+        ) { [weak self, weak controller, weak contentBlockingCoordinator] in
             BrowserPerformanceSignposts.signposter.endInterval(
                 "InitialWebViewDeferral",
                 deferralState
@@ -112,25 +119,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard
                 let self,
                 let controller,
+                let contentBlockingCoordinator,
                 self.browserWindowController === controller,
                 controller.window?.isVisible == true
             else {
                 return
             }
-            controller.startWebViews(
-                profile: self.profile,
-                viewCount: Self.performanceViewCount(
-                    arguments: ProcessInfo.processInfo.arguments
-                ),
-                initialURL: Self.performanceFixtureURL(
-                    arguments: ProcessInfo.processInfo.arguments
-                ) ?? URL(string: "about:blank")!
-            )
-            DispatchQueue.main.async { [weak self, weak controller] in
-                guard self?.browserWindowController === controller else {
+            Task { [weak self, weak controller, weak contentBlockingCoordinator] in
+                guard
+                    let self,
+                    let controller,
+                    let contentBlockingCoordinator,
+                    self.browserWindowController === controller
+                else {
                     return
                 }
-                controller?.ensureInitialAddressFieldFocus()
+                let ruleSources = (
+                    try? Self.contentBlockerRuleSources(
+                        arguments: ProcessInfo.processInfo.arguments
+                    )
+                ) ?? []
+                await contentBlockingCoordinator.prepare(
+                    currentSources: ruleSources
+                )
+                guard
+                    self.browserWindowController === controller,
+                    controller.window?.isVisible == true
+                else {
+                    return
+                }
+                guard contentBlockingCoordinator.isReady else {
+                    controller.contentBlockingPreparationDidFail()
+                    return
+                }
+                controller.startWebViews(
+                    profile: self.profile,
+                    viewCount: Self.performanceViewCount(
+                        arguments: ProcessInfo.processInfo.arguments
+                    ),
+                    initialURL: Self.performanceFixtureURL(
+                        arguments: ProcessInfo.processInfo.arguments
+                    ) ?? URL(string: "about:blank")!
+                )
+                DispatchQueue.main.async { [weak self, weak controller] in
+                    guard self?.browserWindowController === controller else {
+                        return
+                    }
+                    controller?.ensureInitialAddressFieldFocus()
+                }
             }
         }
     }
@@ -216,6 +252,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return nil
         }
         return url
+    }
+
+    static func contentBlockerRuleSources(
+        arguments: [String],
+        bundle: Bundle = .main
+    ) throws -> [ContentBlockerRuleSource] {
+        if arguments.contains("--ui-test-profile") {
+            let namespace = "browser-ui-test-content-blocking-v1"
+            let rules = try ContentBlockerService.probeRules(
+                blockedURLFilter: ".*/privacy/blocked[.]js",
+                exceptionTopURLFilters: []
+            )
+            return [
+                ContentBlockerRuleSource(
+                    namespace: namespace,
+                    identifier: ContentBlockerService.versionedIdentifier(
+                        namespace: namespace,
+                        encodedRules: rules
+                    ),
+                    encodedRulesLoader: { rules }
+                )
+            ]
+        }
+        return try ContentBlockerBundle.loadProductionPackage(
+            from: bundle
+        ).ruleSources
+    }
+
+    static func contentBlockerStateKey(arguments: [String]) -> String {
+        arguments.contains("--ui-test-profile")
+            ? "contentBlocker.uiTests.lastValidRuleSet"
+            : "contentBlocker.lastValidRuleSet"
+    }
+
+    static func contentBlockerSitePolicyKey(arguments: [String]) -> String {
+        arguments.contains("--ui-test-profile")
+            ? "contentBlocker.uiTests.sitePolicy"
+            : "contentBlocker.sitePolicy"
+    }
+
+    private static func makeContentBlockingCoordinator(
+        arguments: [String]
+    ) -> ContentBlockingCoordinator {
+        let stateStore = ContentBlockerStateStore(
+            key: contentBlockerStateKey(arguments: arguments)
+        )
+        let sitePolicyStore = ContentBlockerSitePolicyStore(
+            key: contentBlockerSitePolicyKey(arguments: arguments)
+        )
+        if arguments.contains("--ui-test-profile")
+            && arguments.contains("--reset-ui-test-content-blocking")
+        {
+            sitePolicyStore.reset()
+        }
+        return ContentBlockingCoordinator(
+            resolver: ContentBlockerRuleSetResolver(
+                service: ContentBlockerService(),
+                stateStore: stateStore
+            ),
+            sitePolicyStore: sitePolicyStore
+        )
     }
 
 #if DEBUG
@@ -388,6 +485,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showBookmarksItem.keyEquivalentModifierMask = [.command, .option]
         showBookmarksItem.target = navigationTarget
         addMenu(bookmarksMenu, to: mainMenu)
+
+        let privacyMenu = NSMenu(title: "Privacy")
+        let blockingStatusItem = privacyMenu.addItem(
+            withTitle: "Ad & Tracker Blocking: Preparing…",
+            action: #selector(BrowserWindowController.contentBlockingStatus(_:)),
+            keyEquivalent: ""
+        )
+        blockingStatusItem.target = navigationTarget
+        privacyMenu.addItem(.separator())
+        let siteBlockingItem = privacyMenu.addItem(
+            withTitle: "Blocking Is Not Ready",
+            action: #selector(
+                BrowserWindowController
+                    .toggleContentBlockingForCurrentSiteAndReload(_:)
+            ),
+            keyEquivalent: "p"
+        )
+        siteBlockingItem.keyEquivalentModifierMask = [.command, .option]
+        siteBlockingItem.target = navigationTarget
+        addMenu(privacyMenu, to: mainMenu)
 
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(

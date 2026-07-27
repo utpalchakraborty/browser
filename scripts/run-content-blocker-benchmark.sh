@@ -22,7 +22,7 @@ if ! xcodebuild \
     -test-timeouts-enabled YES \
     -default-test-execution-time-allowance 120 \
     -maximum-test-execution-time-allowance 120 \
-    -only-testing:BrowserTests/ContentBlockerPerformanceTests/testCachedLookupAndSynchronousAttachmentPerformance \
+    -only-testing:BrowserTests/ContentBlockerPerformanceTests/testProductionCachedLookupAndSynchronousAttachmentPerformance \
     ENABLE_TESTABILITY=YES \
     ENABLE_HARDENED_RUNTIME=NO \
     CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES \

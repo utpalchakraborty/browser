@@ -92,4 +92,77 @@ then
     exit 1
 fi
 
-echo "Verified arm64, sandboxed, hardened local Release build: $application"
+resources="$application/Contents/Resources"
+manifest="$resources/ContentBlockerManifest.json"
+if [ ! -f "$manifest" ]; then
+    echo "Release application is missing ContentBlockerManifest.json." >&2
+    exit 1
+fi
+
+assert_sha256() {
+    file=$1
+    expected=$2
+    actual=$(
+        /usr/bin/shasum -a 256 "$file" | /usr/bin/awk '{ print $1 }'
+    )
+    if [ "$actual" != "$expected" ]; then
+        echo "Release resource hash mismatch: $file" >&2
+        exit 1
+    fi
+}
+
+# This digest is deliberately independent of the manifest being inspected.
+# Updating the production package therefore requires an explicit verifier
+# update rather than allowing a changed manifest to approve its own assets.
+assert_sha256 \
+    "$manifest" \
+    328c4deb1f586d69d718f46092e413f99b9893306150c2b0fca7bb21aeb7adfe
+
+for index in 0 1; do
+    resource=$(
+        /usr/bin/plutil -extract "rule_sets.$index.resource" raw -o - "$manifest"
+    )
+    file_extension=$(
+        /usr/bin/plutil -extract "rule_sets.$index.file_extension" raw -o - "$manifest"
+    )
+    expected_sha256=$(
+        /usr/bin/plutil -extract "rule_sets.$index.sha256" raw -o - "$manifest"
+    )
+    rules="$resources/$resource.$file_extension"
+    if [ ! -f "$rules" ]; then
+        echo "Release application is missing $resource.$file_extension." >&2
+        exit 1
+    fi
+    actual_sha256=$(
+        /usr/bin/shasum -a 256 "$rules" | /usr/bin/awk '{ print $1 }'
+    )
+    if [ "$actual_sha256" != "$expected_sha256" ]; then
+        echo "Release content-blocker hash mismatch for $resource." >&2
+        exit 1
+    fi
+done
+
+notices="$resources/AdGuardContentBlockerThirdPartyNotices.md"
+license="$resources/AdGuard-Filters-GPL-3.0.txt"
+for required_file in "$notices" "$license"; do
+    if [ ! -f "$required_file" ]; then
+        echo "Release application is missing $(basename "$required_file")." >&2
+        exit 1
+    fi
+done
+assert_sha256 \
+    "$notices" \
+    1721cb96a2958945f85ea3389f8373a3d7938b9a2e4d447faa2cf118aa37de40
+assert_sha256 \
+    "$license" \
+    3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986
+
+if /usr/bin/find "$resources" -type f \( \
+    -name '*_optimized.txt' -o -name 'ConverterTool' \
+\) | /usr/bin/grep -q .
+then
+    echo "Release application unexpectedly ships filter inputs or converter tooling." >&2
+    exit 1
+fi
+
+echo "Verified arm64, sandboxed, hardened Release with pinned blocker assets: $application"

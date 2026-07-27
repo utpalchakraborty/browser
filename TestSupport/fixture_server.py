@@ -19,6 +19,7 @@ class FixtureState:
         self._recovery_port = None
         self._recovery_server = None
         self._recovery_enabled = False
+        self._navigation_gates = {}
 
     def record(self, path):
         with self._lock:
@@ -28,6 +29,10 @@ class FixtureState:
         with self._lock:
             self._request_counts = {}
             self._reload_count = 0
+            navigation_gates = list(self._navigation_gates.values())
+            self._navigation_gates = {}
+        for navigation_gate in navigation_gates:
+            navigation_gate.set()
 
     def reset_reload_count(self):
         with self._lock:
@@ -66,6 +71,22 @@ class FixtureState:
     def recovery_is_enabled(self):
         with self._lock:
             return self._recovery_enabled
+
+    def wait_for_navigation_release(self, gate_id, timeout):
+        with self._lock:
+            navigation_gate = self._navigation_gates.setdefault(
+                gate_id,
+                threading.Event(),
+            )
+        return navigation_gate.wait(timeout=timeout)
+
+    def release_navigation(self, gate_id):
+        with self._lock:
+            navigation_gate = self._navigation_gates.setdefault(
+                gate_id,
+                threading.Event(),
+            )
+        navigation_gate.set()
 
 
 STATE = FixtureState()
@@ -148,6 +169,30 @@ class FixtureHandler(BaseHTTPRequestHandler):
             self.send_json({"reload_count": 0})
         elif path == "/phase2/slow-response":
             self.send_slow_html()
+        elif path.startswith("/privacy/navigation-gate/"):
+            gate_path = path.removeprefix("/privacy/navigation-gate/")
+            gate_components = gate_path.split("/")
+            if len(gate_components) == 1 and gate_components[0]:
+                gate_id = gate_components[0]
+                if STATE.wait_for_navigation_release(gate_id, timeout=10):
+                    try:
+                        self.send_html(
+                            "<!doctype html><title>Navigation Gate</title>"
+                            "<body>Navigation gate released</body>"
+                        )
+                    except (BrokenPipeError, ConnectionResetError):
+                        return
+                else:
+                    self.send_text("navigation gate timed out", status=504)
+            elif (
+                len(gate_components) == 2
+                and gate_components[0]
+                and gate_components[1] == "release"
+            ):
+                STATE.release_navigation(gate_components[0])
+                self.send_json({"status": "released"})
+            else:
+                self.send_text("unknown navigation gate", status=404)
         elif path == "/phase2/recovery-enable":
             recovery_port = STATE.enable_recovery_server()
             if recovery_port is None:
@@ -223,6 +268,43 @@ window.storageReady = Promise.all([
             )
         elif path == "/assets/blocked.js":
             self.send_javascript("window.blockedLoaded = true;")
+        elif path == "/privacy/blocking/":
+            self.send_html(
+                """<!doctype html>
+<title>Privacy Blocking</title>
+<body>
+<main>Privacy Blocking Fixture</main>
+<p id="allowed-resource">First-party resource missing</p>
+<p id="blocked-resource">Ad resource blocked</p>
+<script src="/privacy/allowed.js"></script>
+<script src="/privacy/blocked.js"></script>
+<p>Blocking fixture complete</p>
+</body>"""
+            )
+        elif path == "/privacy/allowed.js":
+            self.send_javascript(
+                "document.getElementById('allowed-resource').textContent = "
+                "'First-party resource loaded';"
+            )
+        elif path == "/privacy/blocked.js":
+            self.send_javascript(
+                "document.getElementById('blocked-resource').textContent = "
+                "'Ad resource loaded';"
+            )
+        elif path == "/privacy/production-blocking/":
+            self.send_html(
+                """<!doctype html>
+<title>Production Privacy Blocking</title>
+<body>
+<script src="/privacy/production-allowed.js"></script>
+<script src="/_xa/ads_probe.js"></script>
+<script>window.productionBlockingFixtureComplete = true;</script>
+</body>"""
+            )
+        elif path == "/privacy/production-allowed.js":
+            self.send_javascript("window.productionAllowedLoaded = true;")
+        elif path == "/_xa/ads_probe.js":
+            self.send_javascript("window.productionAdLoaded = true;")
         elif path == "/popup":
             self.send_html(
                 """<!doctype html>
@@ -239,6 +321,31 @@ open
             )
         elif path == "/popup-target":
             self.send_html("<!doctype html><title>popup target</title><body>popup</body>")
+        elif path == "/privacy/popup-policy":
+            self.send_html(
+                """<!doctype html>
+<title>Popup Policy</title>
+<body>
+<main>Popup Policy Fixture</main>
+<a href="/phase2/page-b" target="_blank">Open Direct Link</a>
+<a id="scripted-anchor" href="/phase2/page-b?popup=scripted-anchor"
+   target="_blank" hidden>Scripted Anchor Target</a>
+<button onclick="window.open('/phase2/page-b?popup=button', '_blank')">
+Try Scripted Popup
+</button>
+<button onclick="document.getElementById('scripted-anchor').click()">
+Try Scripted Anchor
+</button>
+<form action="/phase2/page-b?popup=form" target="_blank">
+<button type="submit">Try Targeted Form</button>
+</form>
+<script>
+window.open('/phase2/page-b?popup=load', '_blank');
+Promise.resolve().then(() => window.open('/phase2/page-b?popup=promise', '_blank'));
+setTimeout(() => window.open('/phase2/page-b?popup=timer', '_blank'), 100);
+</script>
+</body>"""
+            )
         elif path == "/download":
             self.send_bytes(
                 b"phase1-download",

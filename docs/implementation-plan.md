@@ -3,8 +3,10 @@
 Status: Approved; Phases 1 and 2 complete; window geometry approved and
 committed; Phase 3 bookmarks implemented with Debug and Release functional
 verification green and normal workflow approved; recovery and
-launch-performance rerun pending
-Last updated: 2026-07-26
+launch-performance rerun pending; first Phase 4 ad/tracker-blocking and popup-
+suppression checkpoint complete and approved; website-data privacy controls
+remain Phase 4; tabs follow in Phase 5
+Last updated: 2026-07-27
 Architecture: [architecture.md](architecture.md)
 
 ## 1. Confirmed product constraints
@@ -24,8 +26,9 @@ Architecture: [architecture.md](architecture.md)
 - Private windows deferred to daily-driver hardening.
 
 The first usable release is successful when it can serve as a fast personal
-browser for ordinary use with navigation, tabs, bookmarks, and understandable
-privacy controls. Feature count is not a success metric.
+browser for ordinary use with navigation, bookmarks, effective ad/tracker
+blocking, understandable privacy controls, strict popup suppression, and tabs.
+Feature count is not a success metric.
 
 ## 2. Development prerequisites
 
@@ -171,9 +174,9 @@ incremental-per-fixture-tab budget. The replacement must still be concrete.
   window scope.
 - Approve or revise the provisional performance budgets.
 - Select a small representative compatibility set from the sites the user
-  actually needs during the single-page, bookmarked, and tabbed-browser pilot.
-  Phase 0 defines the categories; exact sites are selected before Phase 5
-  blocking acceptance rather than guessed before a usable browser exists.
+  actually needs during the single-page and bookmarked-browser pilot. Phase 0
+  defines the categories; exact sites are selected before Phase 4 blocking
+  acceptance rather than guessed before a usable browser exists.
 
 ### Deliverables
 
@@ -194,7 +197,7 @@ incremental-per-fixture-tab budget. The replacement must still be concrete.
 Phase 0 was approved on 2026-07-26. Production implementation may proceed under
 the recorded scope and gates. The later real-site smoke set will cover the
 user's actual login, documentation, shopping, banking, and media workflows;
-exact sites are selected from the Phase 2 through 4 pilot before Phase 5.
+exact sites are selected from the Phase 2 through 3 pilot before Phase 4.
 
 ## 6. Phase 1 — Toolchain and WebKit risk validation
 
@@ -216,7 +219,7 @@ before building feature layers.
    views.
 7. Prove cookie metadata/value enumeration needed by the later masked UI,
    individual deletion, per-domain deletion, cookie-only clear-all, and broader
-   website-data clear-all behavior. Mask/reveal presentation remains Phase 5 UI
+   website-data clear-all behavior. Mask/reveal presentation remains Phase 4 UI
    work.
 8. Prove broader website-data enumeration and deletion.
 9. Compile, cache, attach, and remove a small WKContentRuleList.
@@ -242,7 +245,7 @@ product polish.
 - Privileged pktap capture with a positive attribution control for production
   blank launch and at least 30 seconds of settled idle time.
 
-Repeated creation/destruction and leak inspection now belong to Phase 4's
+Repeated creation/destruction and leak inspection now belong to Phase 5's
 production TabController lifecycle and 100-cycle churn gate. Phase 1 measures
 one and ten resident views instead. Testing a disposable scaffold's artificial
 deallocation path would not validate the ownership and observer teardown that
@@ -365,7 +368,7 @@ Persist only what the user explicitly asks the browser to remember.
 - Add reset/export documentation for the local bookmark file.
 - Keep settings limited to required browser behavior.
 - Keep bookmark models, storage, and immutable snapshots independent of the
-  future tab layer so Phase 4 can route them through the selected tab.
+  future tab layer so Phase 5 can route them through the selected tab.
 - Keep the first bookmark library flat and searchable. Do not add a persistent
   bookmarks bar or folder hierarchy until real use establishes that need.
 
@@ -418,17 +421,137 @@ are not yet fully approved.
 
 ### Stopping point
 
-Back up, corrupt, recover, restore or reset the bookmark data once, then clear
-the outstanding launch-performance gate before Phase 4 adds tabs. Revisit
-folders only after ordinary use shows the flat searchable library is
-insufficient.
+Back up, corrupt, recover, restore or reset the bookmark data once and clear the
+outstanding launch-performance gate on a clean desktop. Those Phase 3 residuals
+remain tracked while Phase 4 proceeds. Revisit folders only after ordinary use
+shows the flat searchable library is insufficient.
 
-## 9. Phase 4 — Tabs and web-view lifecycle
+## 9. Phase 4 — Ad/tracker blocking, privacy controls, and popup suppression
 
 ### Goal
 
-Add reliable multi-tab browsing without turning tabs into a memory or
-responsiveness problem.
+Materially reduce advertising and tracker requests first, expose understandable
+controls for WebKit-owned website data, and make popup denial an explicit
+privacy and safety backstop before tabs increase the number of browsing
+contexts.
+
+### Work
+
+- Bundle and load the approved pinned advertising/tracker ruleset as the first
+  Phase 4 priority.
+- Show whether blocking is active for the current site.
+- Add and remove a persistent per-site exception with an explicit reload.
+- Prepare rule JSON away from the main actor, invoke WebKit's asynchronous
+  compilation API without blocking the interface, and compile only on first
+  installation or when the pinned bundle changes. Cached ordinary launches
+  load the compiled identifiers without recompiling.
+- Do not allow an unprotected remote navigation while first-install or
+  changed-bundle compilation is pending; expose a visible unavailable state if
+  no last-valid rules can be loaded.
+- Retain the last valid compiled rules after failure.
+- Formalize the popup policy independently of blocker coverage: no page may
+  create a secondary app window, another WKWebView, a background tab, or a
+  tab-under.
+- Deny scripted `window.open` requests and forms targeting a new browsing
+  context, including requests initiated by page script in response to a click.
+  Route only a direct pointer-activated HTTP or HTTPS anchor targeting a new
+  context, and route that deliberate action into the current page while the
+  browser remains single-page. Deny synthetic and keyboard target-blank
+  activation when public API cannot prove a direct pointer gesture.
+- Add a privacy window grouped by website/domain.
+- List cookie metadata and mask values by default; reveal is an explicit local
+  action.
+- Delete one cookie, all cookies for a domain, or all cookies.
+- Show other WebKit site-data categories without pretending their contents are
+  inspectable.
+- Delete selected domain data or all website data.
+- Add an in-app privacy explanation matching architecture.md.
+- Provide reset actions for blocker exceptions and compiled blocker artifacts.
+
+Blocking rules often prevent advertising popup scripts and overlays before they
+run, but delegate-level popup denial is an independent backstop and must work
+even when no filter rule matches. No automatic filter update network request is
+added in this phase. A manual or scheduled updater is a separate future
+decision.
+
+### Tests
+
+- Known tracker and advertising resource blocking tests.
+- First-party resource and login non-regression tests.
+- Exception enable/disable/reload tests against the current page.
+- Cold and cached blocker-state launch tests.
+- Large-list compile, lookup, attachment, and failure rollback tests.
+- Deterministic denial tests for load-time, delayed, asynchronous, and
+  click-handler `window.open`, plus forms targeting a new context.
+- Verify that a direct pointer-activated HTTP or HTTPS anchor targeting a new
+  context navigates the current page, while unsupported schemes are denied.
+- Assert that every denied popup leaves the app-window and WKWebView counts
+  unchanged and cannot create a hidden or background browsing context.
+- Cookie creation, persistence, masking, reveal, deletion, and relaunch tests.
+- Site-data creation and domain/global deletion tests.
+- Network audit proving no telemetry or silent update call.
+- Container audit proving no visit database, URL log, restored session, or
+  recently closed list.
+
+### Exit criteria
+
+- Blocking works on the deterministic suite and the agreed real-site smoke set.
+- A broken site can be recovered with a clear per-site switch.
+- No page script, popup API, or target-blank form can create a secondary window,
+  WKWebView, hidden browsing context, background tab, or tab-under.
+- The user can understand and delete all WebKit-exposed website data.
+- Deletion remains effective after restart.
+- Blocking and popup suppression do not violate launch, navigation, scrolling,
+  CPU, or memory gates.
+- The privacy explanation matches actual disk and network behavior.
+
+### Stopping point
+
+Use the single-page browser with blocking enabled across the agreed real-site
+set, exercise blocker exceptions and website-data deletion, and verify the
+popup backstop before adding tabs.
+
+### Completed blocker checkpoint
+
+The current first slice bundles content-addressed AdGuard Base and Tracking
+Protection lists, enables them by default, compiles only on cache miss, retains
+a complete last-valid set, fails closed when no rules are available, and adds a
+persistent exact-host exception through Privacy and Option-Command-P. There is
+no runtime download or automatic updater.
+
+The single-page popup backstop is also an explicit regression gate. The fixture
+covers load-time, delayed, promise-scheduled, click-handler `window.open`, a
+script-triggered target-blank anchor, a form targeting a new context, and a
+directly clicked target-blank HTTP(S) anchor. Denied paths leave the application
+at one window and one WKWebView; the deliberate direct anchor routes in the
+existing page. Post-fix Debug and Release unit suites are green at 117 of 117,
+and both UI suites are green at 11 of 11. Production-list, benchmark, and
+Release-package checks are also green. Ordinary pending navigation is
+strengthen-only; exact relaxation occurs only for the winning commit, while the
+explicit current-site switch applies the selected policy before reload so it
+can recover a document-level match. Stale, overlapping, post-commit, unbound,
+and fragment action-only callback regressions remain covered. On 2026-07-27,
+the user confirmed that a Release launched with
+`make run` showed no ads on an ad-heavy site, then reported that the blocker and
+popup checkpoint works in hands-on use and approved it.
+
+### Remaining Phase 4 work
+
+- Build the website-data privacy window with cookie metadata, explicit value
+  reveal, per-item/per-domain/global deletion, broader site-data categories,
+  and relaunch verification.
+- Add visible reset-all actions for exact-host exceptions and compiled blocker
+  artifacts.
+- Refresh the blank-network and container audits and rerun full launch,
+  navigation, one/ten-view resource, idle CPU, and responsiveness gates with
+  production blocking active.
+
+## 10. Phase 5 — Tabs and web-view lifecycle
+
+### Goal
+
+Add reliable multi-tab browsing without weakening the established blocking,
+popup, memory, or responsiveness guarantees.
 
 ### Work
 
@@ -436,7 +559,13 @@ responsiveness problem.
 - Add new, close, select, and reorder behavior.
 - Route navigation and bookmark commands to the selected tab in the key window.
 - Add familiar tab keyboard shortcuts.
-- Route user-initiated popup and target-blank navigation to a new tab.
+- Route only a direct pointer-activated HTTP or HTTPS anchor targeting a new
+  context to a new foreground tab. Continue denying scripted `window.open`,
+  target-blank forms, separate app windows, background tabs, and tab-unders.
+- Ensure every new WKWebView uses the normal profile, current compiled rules,
+  and current site policy through WebViewFactory.
+- Apply blocker and exception changes coherently across resident tabs and reload
+  only affected pages when policy changes require it.
 - Keep tab title, URL, progress, and navigation state independent.
 - Create a tab's web view lazily and keep resident views alive when switching.
 - Release all observations and delegates when a tab closes.
@@ -451,12 +580,18 @@ suspension, or session restoration.
 - Unit tests for selection after closing the first, middle, selected, and last
   tab.
 - Unit tests for reorder and command routing.
-- UI tests for tab creation, switching, closing, shortcuts, and popup routing.
-- Verify bookmark creation captures the selected tab and bookmark opening targets
-  the selected tab.
+- UI tests for tab creation, switching, closing, and shortcuts.
+- Verify that a direct pointer-activated target-blank HTTP or HTTPS anchor opens a
+  foreground tab while every scripted, form-driven, background, and tab-under
+  path remains denied.
+- Verify bookmark creation captures the selected tab and bookmark opening
+  targets the selected tab.
 - Verify switching does not reload a resident page.
+- Verify every new tab receives active content rules and that per-site
+  exception changes behave correctly across multiple resident tabs.
 - Verify quit/relaunch restores window geometry but no URL or tab.
-- Rerun bookmark load/search checks alongside the ten-tab switching benchmark.
+- Rerun bookmark load/search and blocker attachment checks alongside the
+  ten-tab switching benchmark.
 - One-hundred-cycle tab churn and leak test.
 - Content-process termination recovery test where automation permits.
 
@@ -465,69 +600,17 @@ suspension, or session restoration.
 - Closing, switching, and bookmark commands can never operate on the wrong web
   view.
 - Closed tab URLs are not retained.
+- Adding tabs cannot bypass content rules, site policy, or the popup-denial
+  invariant.
 - Existing-tab switching meets the latency budget, including while bookmark
-  data is loaded.
+  and blocker state are loaded.
 - Memory settles after churn and remains within the locked tab budget.
 
 ### Stopping point
 
-Use the browser for ordinary multi-tab browsing with bookmarks and record
-friction before adding privacy controls and content blocking.
-
-## 10. Phase 5 — Privacy controls and content blocking
-
-### Goal
-
-Complete the minimum useful privacy browser promised by the project.
-
-### Work
-
-- Add a privacy window grouped by website/domain.
-- List cookie metadata and mask values by default; reveal is an explicit local
-  action.
-- Delete one cookie, all cookies for a domain, or all cookies.
-- Show other WebKit site-data categories without pretending their contents are
-  inspectable.
-- Delete selected domain data or all website data.
-- Bundle and load the approved pinned advertising/tracker ruleset.
-- Show whether blocking is active for the current site.
-- Add and remove a persistent per-site exception with an explicit reload.
-- Prepare rule JSON away from the main actor, invoke WebKit's asynchronous
-  compilation API without blocking the interface, and never compile during
-  normal launch.
-- Retain the last valid compiled rules after failure.
-- Add an in-app privacy explanation matching architecture.md.
-- Provide reset actions for blocker exceptions and compiled blocker artifacts.
-
-No automatic filter update network request is added in this phase. A manual or
-scheduled updater is a separate future decision.
-
-### Tests
-
-- Cookie creation, persistence, masking, reveal, deletion, and relaunch tests.
-- Site-data creation and domain/global deletion tests.
-- Known tracker and advertising resource blocking tests.
-- First-party resource and login non-regression tests.
-- Exception enable/disable/reload tests.
-- Cold and cached blocker-state launch tests.
-- Large-list compile, lookup, attachment, and failure rollback tests.
-- Network audit proving no telemetry or silent update call.
-- Container audit proving no visit database, URL log, restored session, or
-  recently closed list.
-
-### Exit criteria
-
-- The user can understand and delete all WebKit-exposed website data.
-- Deletion remains effective after restart.
-- Blocking works on the deterministic suite and the agreed real-site smoke set.
-- A broken site can be recovered with a clear per-site switch.
-- Blocking does not violate launch, navigation, scrolling, CPU, or memory gates.
-- The privacy explanation matches actual disk and network behavior.
-
-### Stopping point
-
-This is the minimum viable personal browser. Use it as the primary pilot before
-adding daily-driver features.
+This is the minimum viable personal browser. Use it for ordinary multi-tab
+browsing with bookmarks and blocking enabled before adding daily-driver
+features.
 
 ## 11. Phase 6 — Daily-driver hardening
 
@@ -612,12 +695,13 @@ Turn the proven daily-driver build into a reproducible local release.
 | --- | --- | --- |
 | Display web pages | Phase 2 | Local and real-site navigation tests |
 | Fast startup and navigation | Phases 1, 2, and 7 | XCTest metrics and Instruments baseline |
-| Tabs | Phase 4 | Tab behavior, churn, and switching tests |
+| Tabs | Phase 5 | Tab behavior, churn, switching, and privacy-policy inheritance tests |
 | Bookmarks | Phase 3 | Persistence, recovery, and UI tests |
 | Separate cookies | Phase 1 | Explicit WebKit profile persistence test |
-| Inspect/delete cookies | Phase 5 | Cookie fixture and relaunch tests |
-| Delete broader site data | Phase 5 | Per-domain and clear-all integration tests |
-| Block ads and trackers | Phase 5 | Deterministic blocking and exception tests |
+| Block ads and trackers | Phase 4 | Deterministic blocking, compatibility, and exception tests |
+| Suppress popups | Phase 4 | Script/form denial, direct-anchor routing, and secondary-context count tests |
+| Inspect/delete cookies | Phase 4 | Cookie fixture and relaunch tests |
+| Delete broader site data | Phase 4 | Per-domain and clear-all integration tests |
 | No history | Every phase | Container, logging, relaunch, and code review checks |
 | No telemetry | Every phase | Blank/idle network audits and dependency review |
 | Reasonable CPU and memory | Every phase | Locked performance gates and churn tests |
@@ -627,7 +711,8 @@ Turn the proven daily-driver build into a reproducible local release.
 
 | Risk | Mitigation |
 | --- | --- |
-| Per-site blocker exceptions do not behave as expected across live tabs | Prove rule ordering, attachment, and reload behavior in Phase 1 before designing the final UI |
+| Per-site blocker exceptions do not behave as expected across live tabs | Phase 1 proves rule ordering; Phase 4 proves the single-page exception and reload path; Phase 5 verifies policy changes across every new and resident tab |
+| A popup path bypasses blocking or opens a hidden context | Treat content rules and delegate-level denial as independent controls; Phase 4 tests scripted and form-driven denial plus unchanged window/web-view counts, and Phase 5 repeats the gate with tabs |
 | A chosen filter list cannot be translated faithfully to WebKit rules | Validate representative network and cosmetic rules, document unsupported syntax, and keep the source pinned |
 | WebKit process memory dominates the budget | Separate fixed base from incremental tab cost; introduce visible tab discard only after measurement |
 | Some Chromium-oriented sites fail | Keep a real-site smoke matrix, avoid user-agent spoofing by default, and provide a blocker-off recovery path |

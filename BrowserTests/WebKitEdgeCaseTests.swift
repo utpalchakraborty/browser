@@ -21,6 +21,11 @@ final class WebKitEdgeCaseTests: XCTestCase {
         let probe = PopupProbe()
         probe.onCreate = { navigationAction, popup in
             XCTAssertNil(navigationAction.targetFrame)
+            XCTAssertEqual(
+                navigationAction.buttonNumber,
+                0,
+                "JavaScript anchor.click() must not look pointer-activated."
+            )
             XCTAssertTrue(
                 popup.configuration.websiteDataStore === profile.websiteDataStore
             )

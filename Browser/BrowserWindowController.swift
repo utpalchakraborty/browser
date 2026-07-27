@@ -28,6 +28,7 @@ final class BrowserWindowController: NSWindowController,
     var webView: WKWebView? { webViews.first }
 
     private let chromeView: BrowserChromeView
+    private let contentBlockingCoordinator: ContentBlockingCoordinator?
     private var addressInterpreter: AddressInterpreter
     private var searchProvider: SearchProvider
     private var observations: [NSKeyValueObservation] = []
@@ -44,6 +45,11 @@ final class BrowserWindowController: NSWindowController,
     private var isEditingAddress = false
     private var retryURL: URL?
     private var errorAllowsRetry = false
+    private var pendingNavigationURL: URL?
+    private var committedURL: URL?
+    private var currentDocumentURL: URL?
+    private var contentBlockingNavigationState =
+        ContentBlockingNavigationState<WKNavigation>()
 
     private var firstBlankNavigation: WKNavigation?
     private var firstBlankNavigationState: OSSignpostIntervalState?
@@ -52,9 +58,11 @@ final class BrowserWindowController: NSWindowController,
 
     init(
         searchProvider: SearchProvider = .defaultProvider,
-        frameAutosaveName: NSWindow.FrameAutosaveName? = nil
+        frameAutosaveName: NSWindow.FrameAutosaveName? = nil,
+        contentBlockingCoordinator: ContentBlockingCoordinator? = nil
     ) {
         self.searchProvider = searchProvider
+        self.contentBlockingCoordinator = contentBlockingCoordinator
         addressInterpreter = AddressInterpreter(searchProvider: searchProvider)
         chromeView = BrowserChromeView(searchProviderName: searchProvider.displayName)
 
@@ -123,11 +131,19 @@ final class BrowserWindowController: NSWindowController,
             return
         }
 
-        let newWebView = BrowserPerformanceSignposts.signposter.withIntervalSignpost(
-            "InitialWebViewConstruction"
-        ) {
-            profile.webViewFactory.makeWebView()
+        let requestedInitialURL = pendingNavigationURL ?? initialURL
+        let constructedWebView = BrowserPerformanceSignposts.signposter
+            .withIntervalSignpost("InitialWebViewConstruction") {
+                makeWebView(
+                    profile: profile,
+                    applyingContentBlockingFor: requestedInitialURL
+                )
+            }
+        guard let newWebView = constructedWebView else {
+            contentBlockingPreparationDidFail()
+            return
         }
+        pendingNavigationURL = nil
 
         configurePrimaryWebView(newWebView)
         webViews.append(newWebView)
@@ -135,13 +151,23 @@ final class BrowserWindowController: NSWindowController,
         firstBlankNavigationState = BrowserPerformanceSignposts.signposter.beginInterval(
             "FirstBlankNavigation"
         )
-        firstBlankNavigation = newWebView.load(URLRequest(url: initialURL))
+        beginContentBlockingNavigationRequest()
+        let initialNavigation = newWebView.load(
+            URLRequest(url: requestedInitialURL)
+        )
+        firstBlankNavigation = initialNavigation
+        bindContentBlockingNavigation(initialNavigation)
         if firstBlankNavigation == nil {
             finishFirstBlankNavigation(accessibilityValue: "Failed")
         }
 
         for _ in 1..<max(1, viewCount) {
-            let backgroundWebView = profile.webViewFactory.makeWebView()
+            guard let backgroundWebView = makeWebView(
+                profile: profile,
+                applyingContentBlockingFor: requestedInitialURL
+            ) else {
+                break
+            }
             backgroundWebView.navigationDelegate = self
             backgroundWebView.isHidden = true
             install(
@@ -150,8 +176,12 @@ final class BrowserWindowController: NSWindowController,
                 relativeTo: newWebView
             )
             webViews.append(backgroundWebView)
-            backgroundWebView.load(URLRequest(url: initialURL))
+            backgroundWebView.load(URLRequest(url: requestedInitialURL))
         }
+    }
+
+    func contentBlockingPreparationDidFail() {
+        presentContentBlockingUnavailable()
     }
 
     func startBookmarks(
@@ -226,11 +256,13 @@ final class BrowserWindowController: NSWindowController,
             return
         }
         hideError()
-        _ = BrowserPerformanceSignposts.signposter.withIntervalSignpost(
+        beginContentBlockingNavigationRequest()
+        let navigation = BrowserPerformanceSignposts.signposter.withIntervalSignpost(
             "BrowserCommand"
         ) {
             webView.goBack()
         }
+        bindContentBlockingNavigation(navigation)
         window?.makeFirstResponder(webView)
     }
 
@@ -240,11 +272,13 @@ final class BrowserWindowController: NSWindowController,
             return
         }
         hideError()
-        _ = BrowserPerformanceSignposts.signposter.withIntervalSignpost(
+        beginContentBlockingNavigationRequest()
+        let navigation = BrowserPerformanceSignposts.signposter.withIntervalSignpost(
             "BrowserCommand"
         ) {
             webView.goForward()
         }
+        bindContentBlockingNavigation(navigation)
         window?.makeFirstResponder(webView)
     }
 
@@ -266,12 +300,19 @@ final class BrowserWindowController: NSWindowController,
             retryNavigation(sender)
             return
         }
+        let reloadURL = committedURL ?? webView.url ?? observedURL
+        guard prepareContentBlockingPolicyForNavigation(to: reloadURL) else {
+            presentContentBlockingUnavailable()
+            return
+        }
         hideError()
-        _ = BrowserPerformanceSignposts.signposter.withIntervalSignpost(
+        beginContentBlockingNavigationRequest()
+        let navigation = BrowserPerformanceSignposts.signposter.withIntervalSignpost(
             "BrowserCommand"
         ) {
             webView.reload()
         }
+        bindContentBlockingNavigation(navigation)
         window?.makeFirstResponder(webView)
     }
 
@@ -285,6 +326,10 @@ final class BrowserWindowController: NSWindowController,
         ) {
             webView.stopLoading()
         }
+        applyContentBlockingPolicyForCommittedPage(
+            in: webView,
+            mode: contentBlockingNavigationState.cancelLatest()
+        )
     }
 
     @objc
@@ -292,8 +337,15 @@ final class BrowserWindowController: NSWindowController,
         if let retryURL {
             navigate(to: retryURL)
         } else if let webView, webView.url != nil {
+            let reloadURL = committedURL ?? webView.url
+            guard prepareContentBlockingPolicyForNavigation(to: reloadURL) else {
+                presentContentBlockingUnavailable()
+                return
+            }
             hideError()
-            _ = webView.reload()
+            beginContentBlockingNavigationRequest()
+            let navigation = webView.reload()
+            bindContentBlockingNavigation(navigation)
             window?.makeFirstResponder(webView)
         } else {
             focusAddressField()
@@ -326,6 +378,54 @@ final class BrowserWindowController: NSWindowController,
         let manager = bookmarkManager()
         renderBookmarkManager()
         manager.showWindow(sender)
+    }
+
+    @objc
+    func contentBlockingStatus(_ sender: Any?) {}
+
+    @objc
+    func toggleContentBlockingForCurrentSiteAndReload(_ sender: Any?) {
+        guard
+            let contentBlockingCoordinator,
+            let webView,
+            !contentBlockingNavigationState.hasActiveNavigation,
+            let url = committedURL,
+            contentBlockingCoordinator.toggleException(for: url) != nil
+        else {
+            NSSound.beep()
+            return
+        }
+        // This explicit user action is intentionally stronger than ordinary
+        // navigation preparation. Apply the selected exact-host policy before
+        // reloading so an exception can recover even when a production rule
+        // blocks the main document itself.
+        guard applyContentBlockingPolicy(
+            for: url,
+            in: webView,
+            mode: .exact
+        ) else {
+            _ = contentBlockingCoordinator.toggleException(for: url)
+            _ = applyContentBlockingPolicy(
+                for: url,
+                in: webView,
+                mode: .exact
+            )
+            NSSound.beep()
+            return
+        }
+        hideError()
+        beginContentBlockingNavigationRequest()
+        guard let navigation = webView.reload() else {
+            _ = contentBlockingCoordinator.toggleException(for: url)
+            applyContentBlockingPolicyForCommittedPage(
+                in: webView,
+                mode: contentBlockingNavigationState.cancelLatest()
+            )
+            NSSound.beep()
+            return
+        }
+        bindContentBlockingNavigation(navigation)
+        window?.makeFirstResponder(webView)
     }
 
     @objc
@@ -364,6 +464,13 @@ final class BrowserWindowController: NSWindowController,
                 && currentBookmarkPageCandidate != nil
         case #selector(showBookmarks(_:)):
             return bookmarkCoordinator != nil
+        case #selector(contentBlockingStatus(_:)):
+            menuItem.title = contentBlockingStatusTitle
+            return false
+        case #selector(toggleContentBlockingForCurrentSiteAndReload(_:)):
+            let presentation = contentBlockingTogglePresentation
+            menuItem.title = presentation.title
+            return presentation.isEnabled
         case #selector(selectSearchProvider(_:)):
             menuItem.state = (menuItem.representedObject as? String)
                 == searchProvider.rawValue ? .on : .off
@@ -410,8 +517,13 @@ final class BrowserWindowController: NSWindowController,
         }
         observations.forEach { $0.invalidate() }
         observations.removeAll()
-        webView?.navigationDelegate = nil
-        webView?.uiDelegate = nil
+        for webView in webViews {
+            contentBlockingCoordinator?.forget(
+                webView.configuration.userContentController
+            )
+            webView.navigationDelegate = nil
+            webView.uiDelegate = nil
+        }
     }
 
     func webView(
@@ -419,19 +531,58 @@ final class BrowserWindowController: NSWindowController,
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
     ) {
-        let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+        // A nil target frame is a request for a new browsing context. It must
+        // not change the content-blocking policy of the committed page before
+        // the UI delegate denies or deliberately routes that request.
+        let isMainFrame = navigationAction.targetFrame?.isMainFrame == true
         switch NavigationPolicy.decision(
             for: navigationAction.request.url,
             isMainFrame: isMainFrame
         ) {
         case .allow:
             if isMainFrame {
+                if ContentBlockingNavigationURL.isFragmentOnlyNavigation(
+                    from: currentDocumentURL
+                        ?? navigationAction.sourceFrame.request.url
+                        ?? webView.url,
+                    to: navigationAction.request.url
+                ) {
+                    if webView === self.webView {
+                        currentDocumentURL = navigationAction.request.url
+                        applyContentBlockingPolicyForCommittedPage(
+                            in: webView,
+                            mode: contentBlockingNavigationState
+                                .resolveSameDocumentAction()
+                        )
+                        retryURL = navigationAction.request.url
+                    }
+                    decisionHandler(.allow)
+                    return
+                }
+                guard prepareContentBlockingPolicyForNavigation(
+                    to: navigationAction.request.url,
+                    in: webView
+                ) else {
+                    decisionHandler(.cancel)
+                    if webView === self.webView {
+                        _ = contentBlockingNavigationState.cancelAwaitingRequest()
+                    }
+                    presentContentBlockingUnavailable()
+                    return
+                }
+                if webView === self.webView {
+                    _ = contentBlockingNavigationState.approveAction()
+                }
                 retryURL = navigationAction.request.url
             }
             decisionHandler(.allow)
         case .cancel:
             decisionHandler(.cancel)
-            if isMainFrame {
+            if isMainFrame, webView === self.webView {
+                applyContentBlockingPolicyForCommittedPage(
+                    in: webView,
+                    mode: contentBlockingNavigationState.cancelAwaitingRequest()
+                )
                 presentUnsupportedNavigation(url: navigationAction.request.url)
             }
         }
@@ -444,7 +595,13 @@ final class BrowserWindowController: NSWindowController,
     ) {
         guard navigationResponse.canShowMIMEType else {
             decisionHandler(.cancel)
-            if navigationResponse.isForMainFrame {
+            if navigationResponse.isForMainFrame, webView === self.webView {
+                applyContentBlockingPolicyForCommittedPage(
+                    in: webView,
+                    mode: contentBlockingNavigationState.cancelLatest()
+                )
+                finishFirstBlankNavigation(accessibilityValue: "Failed")
+                finishSubmittedNavigation(accessibilityValue: "Failed")
                 presentError(
                     title: "Download Not Available",
                     message: "File downloads will be added during browser hardening.",
@@ -465,20 +622,21 @@ final class BrowserWindowController: NSWindowController,
         guard navigationAction.targetFrame == nil else {
             return nil
         }
-        guard navigationAction.navigationType == .linkActivated else {
+        // WebKit reports both a physical anchor click and JavaScript's
+        // anchor.click() as linkActivated. Route only an unmodified primary-
+        // button click on an HTTP(S) anchor. Scripted, keyboard, modified,
+        // middle-button, and non-web-scheme requests remain denied.
+        guard NewContextNavigationPolicy.shouldRouteInCurrentPage(
+            url: navigationAction.request.url,
+            isLinkActivation: navigationAction.navigationType == .linkActivated,
+            buttonNumber: navigationAction.buttonNumber,
+            modifierFlags: navigationAction.modifierFlags
+        ) else {
             return nil
         }
 
-        switch NavigationPolicy.decision(
-            for: navigationAction.request.url,
-            isMainFrame: true
-        ) {
-        case .allow:
-            if let url = navigationAction.request.url {
-                navigate(to: url)
-            }
-        case .cancel:
-            presentUnsupportedNavigation(url: navigationAction.request.url)
+        if let url = navigationAction.request.url {
+            navigate(to: url)
         }
         return nil
     }
@@ -487,6 +645,7 @@ final class BrowserWindowController: NSWindowController,
         guard webView === self.webView else {
             return
         }
+        bindContentBlockingNavigation(navigation)
         hideError()
         synchronizeObservedState(from: webView, includeURL: false)
         webView.setAccessibilityValue("Loading")
@@ -496,6 +655,14 @@ final class BrowserWindowController: NSWindowController,
         guard webView === self.webView else {
             return
         }
+        committedURL = webView.url
+        currentDocumentURL = webView.url
+        applyContentBlockingPolicyForCommittedPage(
+            in: webView,
+            mode: contentBlockingNavigationState.commit(
+                navigation
+            )
+        )
         synchronizeObservedState(from: webView)
     }
 
@@ -506,7 +673,16 @@ final class BrowserWindowController: NSWindowController,
         guard webView === self.webView else {
             return
         }
+        bindContentBlockingRedirect(navigation)
         retryURL = webView.url
+        guard prepareContentBlockingPolicyForNavigation(
+            to: webView.url,
+            in: webView
+        ) else {
+            webView.stopLoading()
+            presentContentBlockingUnavailable()
+            return
+        }
         synchronizeObservedState(from: webView)
     }
 
@@ -541,6 +717,10 @@ final class BrowserWindowController: NSWindowController,
         guard webView === self.webView else {
             return
         }
+        applyContentBlockingPolicyForCommittedPage(
+            in: webView,
+            mode: contentBlockingNavigationState.cancelLatest()
+        )
         finishFirstBlankNavigation(accessibilityValue: "Failed")
         finishSubmittedNavigation(accessibilityValue: "Failed")
         show(
@@ -560,6 +740,25 @@ final class BrowserWindowController: NSWindowController,
         webView.setAccessibilityValue("Loading")
         install(webView, positioned: .below, relativeTo: chromeView.errorView)
         beginObserving(webView)
+    }
+
+    private func makeWebView(
+        profile: BrowserProfile,
+        applyingContentBlockingFor url: URL
+    ) -> WKWebView? {
+        guard let contentBlockingCoordinator else {
+            return profile.webViewFactory.makeWebView()
+        }
+        let contentController = WKUserContentController()
+        guard contentBlockingCoordinator.applyPolicy(
+            to: contentController,
+            for: url
+        ) else {
+            return nil
+        }
+        return profile.webViewFactory.makeWebView(
+            userContentController: contentController
+        )
     }
 
     private func install(
@@ -633,11 +832,31 @@ final class BrowserWindowController: NSWindowController,
 
     private func navigate(to url: URL) {
         guard let webView else {
+            if contentBlockingCoordinator?.availability == .preparing {
+                pendingNavigationURL = url
+                retryURL = url
+                isEditingAddress = false
+                observedURL = url
+                renderDisplayedURL()
+                hideError()
+                return
+            }
+            if contentBlockingCoordinator?.availability == .unavailable {
+                pendingNavigationURL = url
+                retryURL = url
+                presentContentBlockingUnavailable()
+                return
+            }
             presentError(
                 title: "Browser Isn’t Ready",
                 message: "Wait a moment and try again.",
                 recoveryActionTitle: nil
             )
+            return
+        }
+
+        guard prepareContentBlockingPolicyForNavigation(to: url) else {
+            presentContentBlockingUnavailable()
             return
         }
 
@@ -650,15 +869,156 @@ final class BrowserWindowController: NSWindowController,
         submittedNavigationState = BrowserPerformanceSignposts.signposter.beginInterval(
             "LocalFixtureNavigation"
         )
-        submittedNavigation = BrowserPerformanceSignposts.signposter.withIntervalSignpost(
+        beginContentBlockingNavigationRequest()
+        let navigation = BrowserPerformanceSignposts.signposter.withIntervalSignpost(
             "AddressSubmission"
         ) {
             webView.load(URLRequest(url: url))
         }
+        submittedNavigation = navigation
+        bindContentBlockingNavigation(navigation)
         if submittedNavigation == nil {
             finishSubmittedNavigation(accessibilityValue: "Failed")
         }
         window?.makeFirstResponder(webView)
+    }
+
+    private func applyContentBlockingPolicy(
+        for url: URL?,
+        in targetWebView: WKWebView? = nil,
+        mode: ContentBlockingPolicyApplicationMode = .exact
+    ) -> Bool {
+        guard let contentBlockingCoordinator else {
+            return true
+        }
+        guard let targetWebView = targetWebView ?? webView else {
+            return false
+        }
+        return contentBlockingCoordinator.applyPolicy(
+            to: targetWebView.configuration.userContentController,
+            for: url,
+            mode: mode
+        )
+    }
+
+    private func prepareContentBlockingPolicyForNavigation(
+        to url: URL?,
+        in targetWebView: WKWebView? = nil
+    ) -> Bool {
+        applyContentBlockingPolicy(
+            for: url,
+            in: targetWebView,
+            mode: .strengthenOnly
+        )
+    }
+
+    private func applyContentBlockingPolicyForCommittedPage(
+        in targetWebView: WKWebView,
+        mode: ContentBlockingPolicyApplicationMode
+    ) {
+        guard mode != .none else {
+            return
+        }
+        guard applyContentBlockingPolicy(
+            for: committedURL,
+            in: targetWebView,
+            mode: mode
+        ) else {
+            presentContentBlockingUnavailable()
+            return
+        }
+    }
+
+    private func beginContentBlockingNavigationRequest() {
+        _ = contentBlockingNavigationState.beginRequest()
+    }
+
+    private func bindContentBlockingNavigation(_ navigation: WKNavigation?) {
+        guard let navigation else {
+            guard let webView else {
+                _ = contentBlockingNavigationState.cancelLatest()
+                return
+            }
+            applyContentBlockingPolicyForCommittedPage(
+                in: webView,
+                mode: contentBlockingNavigationState.cancelLatest()
+            )
+            return
+        }
+        _ = contentBlockingNavigationState.bind(navigation)
+    }
+
+    private func bindContentBlockingRedirect(_ navigation: WKNavigation?) {
+        guard let navigation else {
+            return
+        }
+        _ = contentBlockingNavigationState.bindRedirect(navigation)
+    }
+
+    private var currentContentBlockingURL: URL? {
+        committedURL ?? pendingNavigationURL ?? observedURL ?? webView?.url
+    }
+
+    private var contentBlockingStatusTitle: String {
+        guard let contentBlockingCoordinator else {
+            return "Ad & Tracker Blocking: Unavailable"
+        }
+        let snapshot = contentBlockingCoordinator.snapshot(
+            for: currentContentBlockingURL
+        )
+        switch snapshot.availability {
+        case .preparing:
+            return "Ad & Tracker Blocking: Preparing…"
+        case .active:
+            if snapshot.isException, let site = snapshot.site {
+                return "Ad & Tracker Blocking: Off for \(site.host)"
+            }
+            return "Ad & Tracker Blocking: Active"
+        case .activeLastValidRules:
+            if snapshot.isException, let site = snapshot.site {
+                return "Ad & Tracker Blocking: Off for \(site.host)"
+            }
+            return "Ad & Tracker Blocking: Active (Last Valid Rules)"
+        case .unavailable:
+            return "Ad & Tracker Blocking: Unavailable"
+        }
+    }
+
+    private var contentBlockingTogglePresentation: (
+        title: String,
+        isEnabled: Bool
+    ) {
+        guard let contentBlockingCoordinator else {
+            return ("Blocking Is Unavailable", false)
+        }
+        let snapshot = contentBlockingCoordinator.snapshot(
+            for: currentContentBlockingURL
+        )
+        switch snapshot.availability {
+        case .preparing:
+            return ("Blocking Is Not Ready", false)
+        case .unavailable:
+            return ("Blocking Is Unavailable", false)
+        case .active, .activeLastValidRules:
+            guard
+                let site = snapshot.site,
+                committedURL != nil,
+                webView != nil,
+                !contentBlockingNavigationState.hasActiveNavigation
+            else {
+                return ("No Website Selected", false)
+            }
+            let verb = snapshot.isException ? "Enable" : "Disable"
+            return ("\(verb) Blocking for \(site.host) and Reload", true)
+        }
+    }
+
+    private func presentContentBlockingUnavailable() {
+        presentError(
+            title: "Privacy Protection Unavailable",
+            message: "Browser could not load a valid ad and tracker blocking ruleset. Navigation remains paused to avoid loading a page without the expected protection.",
+            recoveryActionTitle: nil
+        )
     }
 
     private func renderDisplayedURL() {
@@ -908,6 +1268,19 @@ final class BrowserWindowController: NSWindowController,
             return
         }
 
+        let disposition = contentBlockingNavigationState.fail(navigation)
+        guard case let .current(mode) = disposition else {
+            finishFirstNavigationIfNeeded(
+                navigation,
+                accessibilityValue: nil
+            )
+            finishSubmittedNavigationIfNeeded(
+                navigation,
+                accessibilityValue: nil
+            )
+            return
+        }
+        applyContentBlockingPolicyForCommittedPage(in: webView, mode: mode)
         synchronizeObservedState(from: webView)
         finishFirstNavigationIfNeeded(
             navigation,
@@ -924,7 +1297,7 @@ final class BrowserWindowController: NSWindowController,
 
     private func finishFirstNavigationIfNeeded(
         _ navigation: WKNavigation?,
-        accessibilityValue: String = "Ready"
+        accessibilityValue: String? = "Ready"
     ) {
         guard navigation === firstBlankNavigation else {
             return
@@ -932,7 +1305,7 @@ final class BrowserWindowController: NSWindowController,
         finishFirstBlankNavigation(accessibilityValue: accessibilityValue)
     }
 
-    private func finishFirstBlankNavigation(accessibilityValue: String) {
+    private func finishFirstBlankNavigation(accessibilityValue: String?) {
         guard let state = firstBlankNavigationState else {
             return
         }
@@ -942,12 +1315,14 @@ final class BrowserWindowController: NSWindowController,
         )
         firstBlankNavigation = nil
         firstBlankNavigationState = nil
-        webView?.setAccessibilityValue(accessibilityValue)
+        if let accessibilityValue {
+            webView?.setAccessibilityValue(accessibilityValue)
+        }
     }
 
     private func finishSubmittedNavigationIfNeeded(
         _ navigation: WKNavigation?,
-        accessibilityValue: String = "Ready"
+        accessibilityValue: String? = "Ready"
     ) {
         guard navigation === submittedNavigation else {
             return
@@ -955,7 +1330,7 @@ final class BrowserWindowController: NSWindowController,
         finishSubmittedNavigation(accessibilityValue: accessibilityValue)
     }
 
-    private func finishSubmittedNavigation(accessibilityValue: String) {
+    private func finishSubmittedNavigation(accessibilityValue: String?) {
         guard let state = submittedNavigationState else {
             return
         }
@@ -965,7 +1340,9 @@ final class BrowserWindowController: NSWindowController,
         )
         submittedNavigation = nil
         submittedNavigationState = nil
-        webView?.setAccessibilityValue(accessibilityValue)
+        if let accessibilityValue {
+            webView?.setAccessibilityValue(accessibilityValue)
+        }
     }
 
     private func presentAddressError(_ error: AddressInterpretationError) {

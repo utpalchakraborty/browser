@@ -3,6 +3,7 @@ import Foundation
 import WebKit
 
 enum ContentBlockerError: Error {
+    case cachedRuleListNotFound(identifier: String)
     case compilationReturnedNoRuleList
     case encodingFailed
 }
@@ -23,12 +24,40 @@ final class ContentBlockerService {
             namespace: namespace,
             encodedRules: encodedRules
         )
-        if let cached = try? await ruleStore.contentRuleList(
-            forIdentifier: identifier
-        ) {
+        if let cached = try await cachedRuleList(identifier: identifier) {
             return cached
         }
 
+        return try await compileRuleList(
+            identifier: identifier,
+            encodedRules: encodedRules
+        )
+    }
+
+    func cachedRuleList(
+        identifier: String
+    ) async throws -> WKContentRuleList? {
+        do {
+            return try await ruleStore.contentRuleList(
+                forIdentifier: identifier
+            )
+        } catch {
+            let webKitError = error as NSError
+            guard
+                webKitError.domain == WKError.errorDomain,
+                webKitError.code
+                    == WKError.Code.contentRuleListStoreLookUpFailed.rawValue
+            else {
+                throw error
+            }
+            return nil
+        }
+    }
+
+    func compileRuleList(
+        identifier: String,
+        encodedRules: String
+    ) async throws -> WKContentRuleList {
         guard let compiled = try await ruleStore.compileContentRuleList(
             forIdentifier: identifier,
             encodedContentRuleList: encodedRules
@@ -63,13 +92,14 @@ final class ContentBlockerService {
 
     static func probeRules(
         blockedURLFilter: String,
-        exceptionTopURLFilters: [String]
+        exceptionTopURLFilters: [String],
+        resourceTypes: [String] = ["script"]
     ) throws -> String {
         var rules = [
             EncodedRule(
                 trigger: Trigger(
                     urlFilter: blockedURLFilter,
-                    resourceTypes: ["script"],
+                    resourceTypes: resourceTypes,
                     ifTopURLs: nil
                 ),
                 action: Action(type: "block")
@@ -89,7 +119,9 @@ final class ContentBlockerService {
             )
         }
 
-        let data = try JSONEncoder().encode(rules)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(rules)
         guard let encoded = String(data: data, encoding: .utf8) else {
             throw ContentBlockerError.encodingFailed
         }

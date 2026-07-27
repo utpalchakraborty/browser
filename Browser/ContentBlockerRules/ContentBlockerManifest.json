@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "rule_sets": [
+    {
+      "display_name": "AdGuard Base",
+      "namespace": "browser-production-adguard-base-v1",
+      "identifier": "browser-production-adguard-base-v1-77b8b478f3e7141ae45a8e1a9448627d986ba205bca72bb16a8b13a2d9b2216e",
+      "resource": "AdGuardBaseRules",
+      "file_extension": "json",
+      "sha256": "77b8b478f3e7141ae45a8e1a9448627d986ba205bca72bb16a8b13a2d9b2216e",
+      "rule_count": 36356,
+      "source": {
+        "title": "AdGuard Base filter (Optimized)",
+        "url": "https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/1429043fe73b7a16577966ff04afa7e5ba630925/platforms/extension/safari/filters/2_optimized.txt",
+        "repository": "https://github.com/AdguardTeam/FiltersRegistry",
+        "commit": "1429043fe73b7a16577966ff04afa7e5ba630925",
+        "path": "platforms/extension/safari/filters/2_optimized.txt",
+        "version": "2.4.79.74",
+        "updated_at": "2026-07-26T18:25:20Z",
+        "sha256": "213c236e810becf7cf174a47bcc24e969a13080a056a98c800dad1bb59fde035"
+      }
+    },
+    {
+      "display_name": "AdGuard Tracking Protection",
+      "namespace": "browser-production-adguard-tracking-v1",
+      "identifier": "browser-production-adguard-tracking-v1-e3643e6ad55ea89692cac68fe5ca499fefa3652937fd74b5912d71899548ca1e",
+      "resource": "AdGuardTrackingProtectionRules",
+      "file_extension": "json",
+      "sha256": "e3643e6ad55ea89692cac68fe5ca499fefa3652937fd74b5912d71899548ca1e",
+      "rule_count": 83156,
+      "source": {
+        "title": "AdGuard Tracking Protection filter (Optimized)",
+        "url": "https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/1429043fe73b7a16577966ff04afa7e5ba630925/platforms/extension/safari/filters/3_optimized.txt",
+        "repository": "https://github.com/AdguardTeam/FiltersRegistry",
+        "commit": "1429043fe73b7a16577966ff04afa7e5ba630925",
+        "path": "platforms/extension/safari/filters/3_optimized.txt",
+        "version": "2.1.8.4",
+        "updated_at": "2026-07-25T06:53:00Z",
+        "sha256": "3b53fbed9d325f6ec9dcef05c3884fe13a7c59b674c0e0049c757c86baea8c14"
+      }
+    }
+  ],
+  "source_project": {
+    "name": "AdGuard Filters",
+    "repository": "https://github.com/AdguardTeam/AdguardFilters",
+    "license": "GPL-3.0-only"
+  },
+  "converter": {
+    "name": "AdGuard Safari Converter",
+    "repository": "https://github.com/AdguardTeam/SafariConverterLib",
+    "version": "4.3.0",
+    "commit": "7a2e93f0afa70479cc59985f332025236c3f0c39",
+    "binary_sha256": "6687be9f1a77abd5299299086c5fbffd0d1b5baec755eb4808aa2f53e275d3c0",
+    "arguments": [
+      "convert",
+      "--safari-version",
+      "26.0",
+      "--advanced-blocking",
+      "false"
+    ],
+    "public_suffix_list_version": "1.1.43",
+    "public_suffix_list_commit": "7ccee9d576d4ca45219440e346f61117f44c816f"
+  }
+}

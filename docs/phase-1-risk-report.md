@@ -1,7 +1,7 @@
 # Phase 1 WebKit Risk Report
 
 Status: GO — Phase 1 complete
-Last updated: 2026-07-26
+Last updated: 2026-07-27
 
 ## Decision
 
@@ -25,8 +25,8 @@ justified.
 | Persistent data fails across real app relaunch | Pass | a DEBUG-only, localhost-restricted probe used three distinct, normally terminated Browser processes and proved Max-Age cookie and localStorage persistence, nonpersistent-store isolation, clear-all deletion, and deletion after another relaunch; `.build/ActualAppProfileProbe.SbYv5p` |
 | Cookies cannot be managed precisely | Pass | persistent/session metadata and values enumerated; individual, host-domain, and global deletion verified; domain-boundary matching tested |
 | Broader site data cannot be explained or cleared | Pass | local storage, IndexedDB, Fetch Cache, and service-worker registrations enumerated and deleted by record and globally |
-| Declarative blocking cannot support a site exception | Pass | replacing the attached list and explicitly reloading the resident fixture toggled an ordered `ignore-previous-rules` exception on and off; removing blocking restored the script |
-| Cached blocker mechanics are too expensive | Pass | isolated cached lookup p95 0.107666 ms and synchronous attachment p95 0.000125 ms; integrated production-list launch overhead remains Phase 5 work |
+| Declarative blocking cannot support a site exception | Pass | replacing the attached list and explicitly reloading the resident fixture toggled an ordered `ignore-previous-rules` exception on and off; Phase 4 keeps ordinary pending policy strengthen-only, applies the explicit current-site choice before reload so document matches remain recoverable, and covers stale/overlap, post-commit/unbound, and fragment action-only ordering regressions |
+| Cached blocker mechanics are too expensive | Pass | Phase 1 isolated cached lookup p95 0.107666 ms and synchronous attachment p95 0.000125 ms; the Phase 4 two-production-list benchmark passes at 0.228416 ms and 0.000209 ms, respectively |
 | Common WebKit delegate paths are missing | Pass with later UI work | target-blank and `window.open` supply a reusable configuration with the same store; HTTP Basic challenges can be answered; unsupported content becomes `WKDownload`; redirect loops report `NSURLErrorHTTPTooManyRedirects` |
 | Web-content failure kills the browser | Pass with recovery gap | a temporally attributed exact WebContent helper received SIGTERM; Browser remained alive and no replacement appeared during the five-second observation, so a visible reload action is required in daily-driver hardening; `.build/WebContentTermination.isWVJb` |
 | WebKit fixed cost makes the browser slow or bloated | Pass | first-frame p95 392.193 ms; one-view aggregate p95 65.6 MiB; ten-view p95 280.5 MiB; idle aggregate CPU averaged 0.020% |
@@ -37,27 +37,36 @@ local under ignored `.build` paths.
 
 ## Content-blocking source policy
 
-The first production ruleset will use the AdGuard Base Filter and AdGuard
-Tracking Protection Filter from the
-[official AdGuard filters repository](https://github.com/AdguardTeam/AdguardFilters).
-The repository is GPL-3.0 licensed. This project is personal-use only; any
-future distribution decision must re-audit source, generated-data, attribution,
-and corresponding-source obligations before shipping the rules.
+The production inputs are AdGuard's optimized Safari exports for the Base and
+Tracking Protection filters from pinned
+[FiltersRegistry](https://github.com/AdguardTeam/FiltersRegistry) commit
+`1429043fe73b7a16577966ff04afa7e5ba630925`. The underlying filters are
+maintained in the
+[official AdGuard filters repository](https://github.com/AdguardTeam/AdguardFilters)
+under GPL-3.0. This project is personal-use only; any future distribution
+decision must re-audit source, generated-data, attribution, and corresponding-
+source obligations before shipping the rules.
 
-Conversion will use a pinned release of the GPL-3.0
+Conversion used pinned release 4.3.0 of the GPL-3.0
 [AdGuard Safari Converter](https://github.com/AdguardTeam/SafariConverterLib)
-as a developer-only command-line tool. It will not be linked into or shipped
-with Browser. Phase 5 will:
+as a developer-only command-line tool. It is not linked into or shipped with
+Browser. The Phase 4 checkpoint:
 
-1. pin the source commit and converter release;
-2. record hashes, licenses, attribution, conversion arguments, accepted and
-   discarded rule counts, and unsupported-rule categories;
-3. commit only deterministic generated WKContentRuleList JSON needed at
+1. pins the source and converter commits and hashes;
+2. records licenses, attribution, conversion arguments, and generated rule
+   counts;
+3. commits only deterministic generated WKContentRuleList JSON needed at
    runtime;
-4. test the generated list against the localhost suite and agreed real-site
-   compatibility smoke set;
-5. measure cold compilation and cached lookup/attachment; and
-6. keep updates manual and release-bound.
+4. tests the generated lists against the deterministic localhost suite;
+5. measures cold compilation and cached lookup/attachment; and
+6. keeps updates manual and release-bound.
+
+On 2026-07-27, the user confirmed that a Release launched with `make run` showed
+no ads on an ad-heavy site, then reported that the blocker and popup checkpoint
+works in hands-on use and approved it. The current manifest records generated output counts but does
+not claim a discarded-rule count or unsupported-syntax category report; that
+provenance gap must be closed before treating regeneration from canonical filter
+sources as a distribution-ready pipeline.
 
 There is no launch-time, scheduled, or silent filter update. A future updater
 would require a separate privacy, integrity, rollback, and performance review.
@@ -67,17 +76,23 @@ would require a separate privacy, integrity, rollback, and performance review.
 - Phase 1 has disposable native chrome, not the Phase 2 address field or
   navigation controls. The address-field focus launch gate becomes directly
   enforceable in Phase 2.
-- Popup creation works at the API boundary, but user-activation policy and tab
-  routing belong in Phases 2 and 3.
+- Popup creation works at the API boundary. Phase 2 suppresses scripted popup
+  requests and routes a direct pointer-activated target-blank HTTP/HTTPS anchor
+  into the current page. Phase 4 makes denial of scripted `window.open`,
+  target-blank forms, separate windows/WKWebViews, background contexts, and
+  tab-unders an explicit regression gate independent of content blocking.
+  Phase 5 may route only the direct anchor case to a foreground tab.
 - Download and HTTP-authentication primitives work, but visible destination and
   credential UI remain daily-driver hardening.
 - The content-process probe uses temporal before/after attribution and SIGTERM,
   not SIGKILL. No replacement appeared within five seconds; this does not claim
   that WebKit can never create one later. The tab must present a recoverable
   error and reload action.
-- The production filter list is not bundled in Phase 1. Only mechanism and
-  cached-attachment cost are proven; large-list conversion, false positives,
-  compile time, and licensing artifacts are Phase 5 acceptance work.
+- The production filter lists were not bundled in Phase 1. Phase 4 now bundles
+  and verifies them, records licensing artifacts, measures roughly 4 to 7
+  seconds for isolated cold compilation, and keeps cached lookup well below the
+  50 ms budget. Real-site false-positive behavior remains a hands-on regression
+  check when the pinned production package changes.
 - The 548.9 MiB cold post-build GPU anomaly is retained in the baseline. The
   settled warm baseline is stable, but future GPU/WebKit or macOS updates must
   rerun it.
@@ -90,7 +105,7 @@ would require a separate privacy, integrity, rollback, and performance review.
   packets, and reported equal received and metadata-filter-drop counts. Other
   malformed or inconsistent captures fail closed.
 - Repeated view teardown and leak inspection are intentionally moved to Phase
-  4's real TabController and 100-cycle churn gate. Phase 1's one- and ten-view
+  5's real TabController and 100-cycle churn gate. Phase 1's one- and ten-view
   results cover fixed/resident cost; an artificial disposable teardown path
   would not validate the production observer and delegate ownership graph.
 
@@ -108,5 +123,5 @@ make network-audit
 make verify-release
 ~~~
 
-Phase 1 is complete. Phase 2 may begin after the user reviews and explicitly
-approves this checkpoint.
+Phase 1 remains complete and approved. See [status.md](status.md) for the
+current phase and outstanding acceptance work.
