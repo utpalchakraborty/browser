@@ -2,6 +2,19 @@
 
 Last updated: 2026-07-27
 
+## Restart snapshot
+
+- The Phase 4 ad/tracker-blocking and popup-suppression checkpoint is complete,
+  approved, and committed as `074fc81` (`Complete Phase 4 blocker checkpoint`).
+- The checkpoint is green in Debug and Release: 117 unit tests and 11 UI tests
+  in each configuration, plus the production blocker benchmark and hardened
+  Release-package verification.
+- Overall Phase 4 remains active. Resume with the website-data privacy window,
+  then add reset-all controls for blocker exceptions and compiled artifacts and
+  rerun the fresh privacy, network, container, and full performance gates.
+- Separate Phase 3 follow-ups remain the manual bookmark recovery exercise and
+  a clean idle-desktop launch-performance rerun. Tabs remain Phase 5.
+
 ## Current phase
 
 Phase 4 — the first ad/tracker-blocking and popup-suppression checkpoint is
