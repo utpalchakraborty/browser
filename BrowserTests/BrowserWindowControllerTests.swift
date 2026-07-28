@@ -27,6 +27,100 @@ final class BrowserWindowControllerTests: XCTestCase {
             NSSize(width: 460, height: 300)
         )
         XCTAssertNotNil(controller.window?.initialFirstResponder)
+        XCTAssertEqual(controller.tabCount, 1)
+        XCTAssertEqual(controller.tabIDs, [controller.selectedTabID])
+    }
+
+    func testNewAndCloseTabUseFreshBlankLastTabBehavior() throws {
+        let controller = BrowserWindowController()
+        let window = try XCTUnwrap(controller.window)
+        let chromeView = try XCTUnwrap(
+            window.contentView as? BrowserChromeView
+        )
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+
+        let originalID = controller.selectedTabID
+        chromeView.addressField.stringValue = "stale address"
+        controller.controlTextDidBeginEditing(
+            Notification(name: NSControl.textDidBeginEditingNotification)
+        )
+        controller.newTab(nil)
+
+        XCTAssertEqual(controller.tabCount, 2)
+        XCTAssertNotEqual(controller.selectedTabID, originalID)
+        XCTAssertNil(controller.webView)
+        XCTAssertEqual(chromeView.addressField.stringValue, "")
+
+        controller.closeSelectedTab(nil)
+
+        XCTAssertEqual(controller.tabCount, 1)
+        XCTAssertEqual(controller.selectedTabID, originalID)
+
+        chromeView.addressField.stringValue = "another stale address"
+        controller.controlTextDidBeginEditing(
+            Notification(name: NSControl.textDidBeginEditingNotification)
+        )
+        controller.closeSelectedTab(nil)
+
+        XCTAssertEqual(controller.tabCount, 1)
+        XCTAssertNotEqual(controller.selectedTabID, originalID)
+        XCTAssertNil(controller.webView)
+        XCTAssertEqual(chromeView.addressField.stringValue, "")
+    }
+
+    func testNewBlankTabStaysLazyAfterProfileIsReady() throws {
+        let controller = BrowserWindowController()
+        let window = try XCTUnwrap(controller.window)
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        controller.startWebView(
+            profile: BrowserProfile(dataStoreIdentifier: UUID())
+        )
+
+        XCTAssertEqual(controller.webViews.count, 1)
+
+        controller.newTab(nil)
+
+        XCTAssertEqual(controller.tabCount, 2)
+        XCTAssertEqual(controller.webViews.count, 1)
+        XCTAssertNil(controller.webView)
+    }
+
+    func testQueuedTabsBeforeProfileReadinessBothLoad() async throws {
+        let controller = BrowserWindowController()
+        let window = try XCTUnwrap(controller.window)
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        let firstURL = Phase1Fixture.url(
+            "/phase2/page-a?queued=first"
+        ).absoluteURL
+        let secondURL = Phase1Fixture.url(
+            "/phase2/page-b?queued=second"
+        ).absoluteURL
+
+        controller.openBookmark(firstURL)
+        let firstTabID = controller.selectedTabID
+        controller.newTab(nil)
+        controller.openBookmark(secondURL)
+        let secondTabID = controller.selectedTabID
+
+        XCTAssertNil(controller.webView)
+        controller.startWebView(
+            profile: BrowserProfile(dataStoreIdentifier: UUID())
+        )
+
+        let bothLoaded = await waitUntil {
+            let paths = Set(controller.webViews.compactMap { $0.url?.path })
+            return paths == Set([firstURL.path, secondURL.path])
+                && controller.webViews.allSatisfy { !$0.isLoading }
+        }
+        XCTAssertTrue(bothLoaded)
+
+        controller.selectTab(id: firstTabID)
+        XCTAssertEqual(controller.webView?.url?.path, firstURL.path)
+        controller.selectTab(id: secondTabID)
+        XCTAssertEqual(controller.webView?.url?.path, secondURL.path)
     }
 
     func testApplicationStateRestorationIsDisabled() {
@@ -271,6 +365,62 @@ final class BrowserWindowControllerTests: XCTestCase {
         )
     }
 
+    func testReenablingProtectionWaitsForSameHostBackgroundNavigation() async throws {
+        let gateID = UUID().uuidString
+        let gatePath = "/privacy/navigation-gate/\(gateID)"
+        let exceptedURL = Phase1Fixture.url("/normal/").absoluteURL
+        let gatedURL = Phase1Fixture.url(gatePath).absoluteURL
+        let fixture = try await makeContentBlockingControllerFixture(
+            initialURL: exceptedURL,
+            exceptionURL: exceptedURL
+        )
+        defer {
+            fixture.cleanUp(releasingNavigationGateIDs: [gateID])
+        }
+
+        XCTAssertTrue(fixture.coordinator.snapshot(for: exceptedURL).isException)
+        let firstTabID = fixture.controller.selectedTabID
+        fixture.controller.newTab(nil)
+        fixture.controller.openBookmark(gatedURL)
+        let backgroundWebView = try XCTUnwrap(fixture.controller.webView)
+
+        let requestReachedGate = await waitUntilAsync {
+            try await self.fixtureRequestCount(gatePath) > 0
+        }
+        XCTAssertTrue(requestReachedGate)
+        fixture.controller.selectTab(id: firstTabID)
+
+        fixture.controller.toggleContentBlockingForCurrentSiteAndReload(nil)
+
+        XCTAssertTrue(
+            fixture.coordinator.snapshot(for: exceptedURL).isException,
+            "Protection changed while an affected background request was in flight."
+        )
+        XCTAssertTrue(backgroundWebView.isLoading)
+
+        try await requestFixture("\(gatePath)/release")
+        let backgroundFinished = await waitUntil {
+            backgroundWebView.url?.path == gatePath
+                && !backgroundWebView.isLoading
+        }
+        XCTAssertTrue(backgroundFinished)
+
+        fixture.controller.toggleContentBlockingForCurrentSiteAndReload(nil)
+        XCTAssertFalse(fixture.coordinator.snapshot(for: exceptedURL).isException)
+        let protectedReloadsFinished = await waitUntil {
+            fixture.controller.webViews.allSatisfy { !$0.isLoading }
+        }
+        XCTAssertTrue(protectedReloadsFinished)
+        let firstTabLoadedBlockedScript = try await dynamicBlockedScriptLoaded(
+            in: fixture.webView
+        )
+        let backgroundTabLoadedBlockedScript = try await dynamicBlockedScriptLoaded(
+            in: backgroundWebView
+        )
+        XCTAssertFalse(firstTabLoadedBlockedScript)
+        XCTAssertFalse(backgroundTabLoadedBlockedScript)
+    }
+
     func testPageNavigationSupersedesSlowProtectedNavigationWithoutWeakening() async throws {
         let firstGateID = UUID().uuidString
         let replacementGateID = UUID().uuidString
@@ -511,6 +661,67 @@ final class BrowserWindowControllerTests: XCTestCase {
 
         XCTAssertEqual(editor.string, "focus-probe")
         XCTAssertEqual(editor.selectedRange, NSRange(location: 1, length: 0))
+    }
+
+    func testSelectedCommandsRouteToIndependentResidentTabs() async throws {
+        let controller = BrowserWindowController()
+        let window = try XCTUnwrap(controller.window)
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        let profile = BrowserProfile(dataStoreIdentifier: UUID())
+        let firstURL = Phase1Fixture.url("/phase2/page-a").absoluteURL
+        let secondURL = Phase1Fixture.url("/phase2/page-b").absoluteURL
+
+        controller.startWebViews(
+            profile: profile,
+            viewCount: 1,
+            initialURL: firstURL
+        )
+        let firstLoaded = await waitUntil {
+            controller.webView?.url?.path == firstURL.path
+                && controller.webView?.isLoading == false
+        }
+        XCTAssertTrue(firstLoaded)
+        let firstTabID = controller.selectedTabID
+        let firstWebView = try XCTUnwrap(controller.webView)
+        _ = try await firstWebView.evaluateJavaScript(
+            "window.__browserTabSwitchSentinel = 'resident'"
+        )
+
+        controller.newTab(nil)
+        let secondTabID = controller.selectedTabID
+        controller.openBookmark(secondURL)
+
+        let secondLoaded = await waitUntil {
+            controller.webView?.url?.path == secondURL.path
+                && controller.webView?.isLoading == false
+        }
+        XCTAssertTrue(secondLoaded)
+        let secondWebView = try XCTUnwrap(controller.webView)
+        XCTAssertFalse(firstWebView === secondWebView)
+        XCTAssertTrue(
+            firstWebView.configuration.websiteDataStore
+                === secondWebView.configuration.websiteDataStore
+        )
+
+        controller.selectTab(id: firstTabID)
+        XCTAssertTrue(controller.webView === firstWebView)
+        XCTAssertEqual(controller.webView?.url?.path, firstURL.path)
+        let residentSentinel = try await firstWebView.evaluateJavaScript(
+            "window.__browserTabSwitchSentinel"
+        ) as? String
+        XCTAssertEqual(residentSentinel, "resident")
+
+        controller.selectTab(id: secondTabID)
+        XCTAssertTrue(controller.webView === secondWebView)
+        XCTAssertEqual(controller.webView?.url?.path, secondURL.path)
+
+        controller.closeSelectedTab(nil)
+        XCTAssertEqual(controller.tabCount, 1)
+        XCTAssertEqual(controller.selectedTabID, firstTabID)
+        XCTAssertTrue(controller.webView === firstWebView)
+        XCTAssertNil(secondWebView.navigationDelegate)
+        XCTAssertNil(secondWebView.uiDelegate)
     }
 
     private func dynamicBlockedScriptLoaded(

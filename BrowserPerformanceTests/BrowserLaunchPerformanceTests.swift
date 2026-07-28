@@ -308,15 +308,173 @@ final class BrowserLaunchPerformanceTests: XCTestCase {
         application.terminate()
     }
 
+    func testNewBlankTabChromeResponse() {
+        let application = launchPerformanceBrowser()
+        let tabElements = tabs(in: application)
+        waitForCount(tabElements, equalTo: 1)
+
+        let options = XCTMeasureOptions()
+        options.iterationCount = 20
+        measure(
+            metrics: [
+                XCTOSSignpostMetric(
+                    subsystem: Self.subsystem,
+                    category: Self.category,
+                    name: "TabCreation"
+                ),
+            ],
+            options: options
+        ) {
+            application.typeKey("t", modifierFlags: .command)
+            waitForCount(tabElements, equalTo: 2)
+            application.typeKey("w", modifierFlags: .command)
+            waitForCount(tabElements, equalTo: 1)
+        }
+
+        application.terminate()
+    }
+
+    func testSwitchBetweenTenResidentTabs() {
+        let application = launchPerformanceBrowser(
+            viewCount: 10,
+            fixtureURL: Self.fixtureOrigin + "/normal/"
+        )
+        let tabElements = tabs(in: application)
+        waitForCount(tabElements, equalTo: 10)
+
+        let loadedTabs = tabElements.matching(
+            NSPredicate(format: "label != %@", "New Tab")
+        )
+        waitForCount(loadedTabs, equalTo: 10)
+
+        let firstTab = tabElements.element(boundBy: 0)
+        let secondTab = tabElements.element(boundBy: 1)
+        XCTAssertTrue(firstTab.exists)
+        XCTAssertTrue(secondTab.exists)
+
+        var selectsSecondTab = true
+        let options = XCTMeasureOptions()
+        options.iterationCount = 50
+        measure(
+            metrics: [
+                XCTOSSignpostMetric(
+                    subsystem: Self.subsystem,
+                    category: Self.category,
+                    name: "TabSelection"
+                ),
+            ],
+            options: options
+        ) {
+            (selectsSecondTab ? secondTab : firstTab).click()
+            selectsSecondTab.toggle()
+        }
+
+        application.terminate()
+    }
+
+    func testOneHundredBlankTabOpenCloseCycles() {
+        let application = launchPerformanceBrowser()
+        let tabElements = tabs(in: application)
+        waitForCount(tabElements, equalTo: 1)
+
+        var isDiscardedWarmUp = true
+        var completedCycles = 0
+        let options = XCTMeasureOptions()
+        options.iterationCount = 10
+        measure(
+            metrics: [XCTMemoryMetric(application: application)],
+            options: options
+        ) {
+            // XCTest invokes this block once before the requested iterations
+            // and discards that sample. Keep the warm-up empty so the ten
+            // exported batches contain exactly 100 complete tab cycles.
+            if isDiscardedWarmUp {
+                isDiscardedWarmUp = false
+                return
+            }
+            for _ in 0 ..< 10 {
+                application.typeKey("t", modifierFlags: .command)
+                waitForCount(tabElements, equalTo: 2)
+                application.typeKey("w", modifierFlags: .command)
+                waitForCount(tabElements, equalTo: 1)
+                completedCycles += 1
+            }
+        }
+
+        XCTAssertFalse(isDiscardedWarmUp)
+        XCTAssertEqual(completedCycles, 100)
+        waitForCount(tabElements, equalTo: 1)
+        application.terminate()
+    }
+
+    private func launchPerformanceBrowser(
+        viewCount: Int? = nil,
+        fixtureURL: String? = nil
+    ) -> XCUIApplication {
+        let application = XCUIApplication()
+        application.launchArguments = [
+            "--performance-test",
+            "-ApplePersistenceIgnoreState",
+            "YES",
+        ]
+        if let viewCount, let fixtureURL {
+            application.launchArguments += [
+                "--performance-view-count",
+                String(viewCount),
+                "--performance-fixture-url",
+                fixtureURL,
+            ]
+        }
+        application.launch()
+
+        XCTAssertTrue(
+            application.windows["BrowserMainWindow"]
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            application.descendants(matching: .any)["BrowserAddressField"]
+                .waitForExistence(timeout: 5)
+        )
+        return application
+    }
+
+    private func tabs(in application: XCUIApplication) -> XCUIElementQuery {
+        application.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "BrowserTab.")
+        )
+    }
+
+    private func waitForCount(
+        _ query: XCUIElementQuery,
+        equalTo expectedCount: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(10)
+        while query.count != expectedCount, Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTAssertEqual(
+            query.count,
+            expectedCount,
+            "Element count did not become \(expectedCount).",
+            file: file,
+            line: line
+        )
+    }
+
     private func assertFocused(
         _ element: XCUIElement,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let focusProbe = "focus-probe"
-        element.typeText(focusProbe)
+        let focusProbe = "x"
+        element.typeKey(focusProbe, modifierFlags: [])
+        let enteredValue = (element.value as? String)?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
         XCTAssertEqual(
-            element.value as? String,
+            enteredValue,
             focusProbe,
             "Typing without clicking did not reach the launch-focused address field.",
             file: file,

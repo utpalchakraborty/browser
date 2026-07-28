@@ -2,6 +2,7 @@ import AppKit
 
 @MainActor
 final class BrowserChromeView: NSView {
+    let tabStrip = BrowserTabStripView()
     let backButton = NSButton()
     let forwardButton = NSButton()
     let reloadStopButton = NSButton()
@@ -90,13 +91,21 @@ final class BrowserChromeView: NSView {
         errorView.isHidden = true
         pageContainer.addSubview(errorView)
 
+        tabStrip.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(tabStrip)
         addSubview(toolbar)
         addSubview(separator)
         addSubview(progressIndicator)
         addSubview(pageContainer)
 
         NSLayoutConstraint.activate([
-            toolbar.topAnchor.constraint(equalTo: topAnchor),
+            tabStrip.topAnchor.constraint(equalTo: topAnchor),
+            tabStrip.leadingAnchor.constraint(equalTo: leadingAnchor),
+            tabStrip.trailingAnchor.constraint(equalTo: trailingAnchor),
+            tabStrip.heightAnchor.constraint(equalToConstant: 36),
+
+            toolbar.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
             toolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
             toolbar.heightAnchor.constraint(equalToConstant: 46),

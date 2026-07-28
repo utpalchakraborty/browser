@@ -15,23 +15,25 @@ enum BrowserPerformanceSignposts {
 final class BrowserWindowController: NSWindowController,
     NSMenuItemValidation,
     NSWindowDelegate,
-    NSTextFieldDelegate,
-    WKNavigationDelegate,
-    WKUIDelegate
+    NSTextFieldDelegate
 {
     static let mainWindowFrameAutosaveName: NSWindow.FrameAutosaveName =
         "BrowserMainWindow"
     static let uiTestWindowFrameAutosaveName: NSWindow.FrameAutosaveName =
         "BrowserMainWindow.UITests"
 
-    private(set) var webViews: [WKWebView] = []
-    var webView: WKWebView? { webViews.first }
+    private let tabManager: TabManager
+    private var profile: BrowserProfile?
+    var webViews: [WKWebView] { tabManager.residentWebViews }
+    var webView: WKWebView? { tabManager.selectedTab.webView }
+    var tabCount: Int { tabManager.tabs.count }
+    var tabIDs: [UUID] { tabManager.tabs.map(\.id) }
+    var selectedTabID: UUID { tabManager.selectedTabID }
 
     private let chromeView: BrowserChromeView
     private let contentBlockingCoordinator: ContentBlockingCoordinator?
     private var addressInterpreter: AddressInterpreter
     private var searchProvider: SearchProvider
-    private var observations: [NSKeyValueObservation] = []
     private var bookmarkCoordinator: BookmarkCoordinator?
     private var bookmarkManagerWindowController: BookmarkManagerWindowController?
     private var bookmarkEditorSheetController: BookmarkEditorSheetController?
@@ -41,25 +43,8 @@ final class BrowserWindowController: NSWindowController,
     private var compiledBlockerResetTask: Task<Void, Never>?
     private var compiledBlockerArtifactsWereReset = false
 
-    private var observedURL: URL?
-    private var observedTitle: String?
-    private var observedProgress = 0.0
-    private var observedIsLoading = false
-    private var observedCanGoBack = false
-    private var observedCanGoForward = false
     private var isEditingAddress = false
-    private var retryURL: URL?
-    private var errorAllowsRetry = false
-    private var pendingNavigationURL: URL?
-    private var committedURL: URL?
-    private var currentDocumentURL: URL?
-    private var contentBlockingNavigationState =
-        ContentBlockingNavigationState<WKNavigation>()
-
-    private var firstBlankNavigation: WKNavigation?
-    private var firstBlankNavigationState: OSSignpostIntervalState?
-    private var submittedNavigation: WKNavigation?
-    private var submittedNavigationState: OSSignpostIntervalState?
+    private var renderedTabPresentations: [BrowserTabPresentation] = []
 
     init(
         searchProvider: SearchProvider = .defaultProvider,
@@ -68,6 +53,10 @@ final class BrowserWindowController: NSWindowController,
     ) {
         self.searchProvider = searchProvider
         self.contentBlockingCoordinator = contentBlockingCoordinator
+        let initialTab = TabController(
+            contentBlockingCoordinator: contentBlockingCoordinator
+        )
+        tabManager = TabManager(initialTab: initialTab)
         addressInterpreter = AddressInterpreter(searchProvider: searchProvider)
         chromeView = BrowserChromeView(searchProviderName: searchProvider.displayName)
 
@@ -109,8 +98,19 @@ final class BrowserWindowController: NSWindowController,
         chromeView.bookmarkButton.action = #selector(bookmarkCurrentPage(_:))
         chromeView.errorView.retryButton.target = self
         chromeView.errorView.retryButton.action = #selector(retryNavigation(_:))
+        chromeView.tabStrip.onNewTab = { [weak self] in
+            self?.newTab(nil)
+        }
+        chromeView.tabStrip.onSelectTab = { [weak self] id in
+            self?.selectTab(id: id)
+        }
+        chromeView.tabStrip.onCloseTab = { [weak self] id in
+            self?.closeTab(id: id)
+        }
         window.initialFirstResponder = chromeView.addressField
 
+        configureTab(initialTab)
+        renderTabs()
         renderNavigationState()
     }
 
@@ -132,57 +132,61 @@ final class BrowserWindowController: NSWindowController,
         viewCount: Int,
         initialURL: URL
     ) {
-        guard webViews.isEmpty, window?.isVisible == true else {
+        guard self.profile == nil, window?.isVisible == true else {
+            return
+        }
+        self.profile = profile
+
+        for tab in tabManager.tabs {
+            tab.installWebViewFactory(profile.webViewFactory)
+        }
+
+        let requestedInitialURL = tabManager.selectedTab.pendingNavigationURL
+            ?? initialURL
+        guard tabManager.selectedTab.realizeInitialWebView(
+            for: requestedInitialURL
+        ) else {
+            contentBlockingPreparationDidFail()
+            renderSelectedTab()
+            return
+        }
+        let initialLoadStarted = tabManager.selectedTab.loadInitial(
+            URLRequest(url: requestedInitialURL),
+            measureFirstBlankNavigation: true
+        )
+        guard initialLoadStarted else {
+            contentBlockingPreparationDidFail()
+            renderSelectedTab()
             return
         }
 
-        let requestedInitialURL = pendingNavigationURL ?? initialURL
-        let constructedWebView = BrowserPerformanceSignposts.signposter
-            .withIntervalSignpost("InitialWebViewConstruction") {
-                makeWebView(
-                    profile: profile,
-                    applyingContentBlockingFor: requestedInitialURL
+        let selectedTab = tabManager.selectedTab
+        let existingBackgroundTabs = tabManager.tabs.filter {
+            $0 !== selectedTab
+        }
+        for tab in existingBackgroundTabs {
+            guard
+                let pendingURL = tab.pendingNavigationURL,
+                pendingURL.absoluteString != "about:blank"
+            else {
+                continue
+            }
+            _ = tab.loadInBackground(URLRequest(url: pendingURL))
+        }
+
+        let requestedViewCount = max(1, viewCount)
+        if tabManager.tabs.count < requestedViewCount {
+            for _ in tabManager.tabs.count..<requestedViewCount {
+                let backgroundTab = makeTab()
+                tabManager.append(backgroundTab, select: false)
+                _ = backgroundTab.loadInBackground(
+                    URLRequest(url: requestedInitialURL)
                 )
             }
-        guard let newWebView = constructedWebView else {
-            contentBlockingPreparationDidFail()
-            return
-        }
-        pendingNavigationURL = nil
-
-        configurePrimaryWebView(newWebView)
-        webViews.append(newWebView)
-
-        firstBlankNavigationState = BrowserPerformanceSignposts.signposter.beginInterval(
-            "FirstBlankNavigation"
-        )
-        beginContentBlockingNavigationRequest()
-        let initialNavigation = newWebView.load(
-            URLRequest(url: requestedInitialURL)
-        )
-        firstBlankNavigation = initialNavigation
-        bindContentBlockingNavigation(initialNavigation)
-        if firstBlankNavigation == nil {
-            finishFirstBlankNavigation(accessibilityValue: "Failed")
         }
 
-        for _ in 1..<max(1, viewCount) {
-            guard let backgroundWebView = makeWebView(
-                profile: profile,
-                applyingContentBlockingFor: requestedInitialURL
-            ) else {
-                break
-            }
-            backgroundWebView.navigationDelegate = self
-            backgroundWebView.isHidden = true
-            install(
-                backgroundWebView,
-                positioned: .below,
-                relativeTo: newWebView
-            )
-            webViews.append(backgroundWebView)
-            backgroundWebView.load(URLRequest(url: requestedInitialURL))
-        }
+        renderTabs()
+        renderSelectedTab()
     }
 
     func contentBlockingPreparationDidFail() {
@@ -228,10 +232,10 @@ final class BrowserWindowController: NSWindowController,
 
     var currentBookmarkPageCandidate: BookmarkPageCandidate? {
         BookmarkPageCandidate.currentPage(
-            url: observedURL,
-            title: observedTitle,
-            isLoading: observedIsLoading,
-            hasVisibleError: !chromeView.errorView.isHidden
+            url: tabManager.selectedTab.observedURL,
+            title: tabManager.selectedTab.observedTitle,
+            isLoading: tabManager.selectedTab.observedIsLoading,
+            hasVisibleError: tabManager.selectedTab.hasVisibleError
         )
     }
 
@@ -265,6 +269,192 @@ final class BrowserWindowController: NSWindowController,
     }
 
     @objc
+    func newTab(_ sender: Any?) {
+        BrowserPerformanceSignposts.signposter.withIntervalSignpost(
+            "TabCreation"
+        ) {
+            let tab = makeTab()
+            tabManager.append(tab, select: true)
+            prepareForSelectedTabChange()
+            attachSelectedWebView()
+            renderTabs()
+            renderSelectedTab()
+            focusAddressField()
+        }
+    }
+
+    @objc
+    func closeSelectedTab(_ sender: Any?) {
+        closeTab(id: tabManager.selectedTabID)
+    }
+
+    func selectTab(id: UUID) {
+        guard tabManager.tab(id: id) != nil else {
+            return
+        }
+        guard id != tabManager.selectedTabID else {
+            renderTabs()
+            return
+        }
+        BrowserPerformanceSignposts.signposter.withIntervalSignpost(
+            "TabSelection"
+        ) {
+            _ = tabManager.select(id: id)
+            prepareForSelectedTabChange()
+            attachSelectedWebView()
+            renderTabs()
+            renderSelectedTab()
+            focusSelectedTabContent()
+        }
+    }
+
+    private func closeTab(id: UUID) {
+        if tabManager.tabs.count == 1 {
+            guard id == tabManager.selectedTabID else {
+                return
+            }
+            let replacement = makeTab()
+            let removed = tabManager.replaceSoleTab(with: replacement)
+            removed.close()
+            prepareForSelectedTabChange()
+            attachSelectedWebView()
+            renderTabs()
+            renderSelectedTab()
+            focusAddressField()
+            return
+        }
+
+        let selectionChanged = id == tabManager.selectedTabID
+        guard let removed = tabManager.remove(id: id) else {
+            return
+        }
+        removed.close()
+        if selectionChanged {
+            prepareForSelectedTabChange()
+            attachSelectedWebView()
+        }
+        renderTabs()
+        renderSelectedTab()
+        if selectionChanged {
+            focusSelectedTabContent()
+        }
+    }
+
+    private func makeTab() -> TabController {
+        let tab = TabController(
+            contentBlockingCoordinator: contentBlockingCoordinator
+        )
+        configureTab(tab)
+        if let profile {
+            tab.installWebViewFactory(profile.webViewFactory)
+        }
+        return tab
+    }
+
+    private func configureTab(_ tab: TabController) {
+        tab.onStateChange = { [weak self, weak tab] changedTab in
+            guard let self, let tab, changedTab === tab else {
+                return
+            }
+            tabStateDidChange(tab)
+        }
+        tab.onOpenTab = { [weak self] request, disposition in
+            self?.openTab(request: request, disposition: disposition)
+        }
+    }
+
+    private func openTab(
+        request: URLRequest,
+        disposition: NewTabNavigationDisposition
+    ) {
+        guard
+            disposition == .foregroundTab
+                || disposition == .backgroundTab,
+            let url = request.url,
+            ["http", "https"].contains(url.scheme?.lowercased() ?? "")
+        else {
+            return
+        }
+
+        let selectsNewTab = disposition == .foregroundTab
+        let tab = makeTab()
+        tabManager.append(tab, select: selectsNewTab)
+        _ = tab.loadInBackground(request)
+        if selectsNewTab {
+            attachSelectedWebView()
+            renderSelectedTab()
+            focusSelectedTabContent()
+        }
+        renderTabs()
+    }
+
+    private func tabStateDidChange(_ tab: TabController) {
+        renderTabs()
+        guard tab.id == tabManager.selectedTabID else {
+            return
+        }
+        attachSelectedWebView()
+        renderSelectedTab()
+    }
+
+    private func attachSelectedWebView() {
+        let selectedTab = tabManager.selectedTab
+        for tab in tabManager.tabs {
+            let isSelected = tab === selectedTab
+            tab.setSelectedAccessibility(isSelected)
+            guard let residentView = tab.webView else {
+                continue
+            }
+            if isSelected {
+                if residentView.superview !== chromeView.pageContainer {
+                    chromeView.pageContainer.addSubview(
+                        residentView,
+                        positioned: .below,
+                        relativeTo: chromeView.errorView
+                    )
+                    NSLayoutConstraint.activate([
+                        residentView.topAnchor.constraint(
+                            equalTo: chromeView.pageContainer.topAnchor
+                        ),
+                        residentView.leadingAnchor.constraint(
+                            equalTo: chromeView.pageContainer.leadingAnchor
+                        ),
+                        residentView.trailingAnchor.constraint(
+                            equalTo: chromeView.pageContainer.trailingAnchor
+                        ),
+                        residentView.bottomAnchor.constraint(
+                            equalTo: chromeView.pageContainer.bottomAnchor
+                        ),
+                    ])
+                }
+            } else if residentView.superview != nil {
+                residentView.removeFromSuperview()
+            }
+        }
+    }
+
+    private func focusSelectedTabContent() {
+        if let webView = tabManager.selectedTab.webView {
+            window?.makeFirstResponder(webView)
+        } else {
+            focusAddressField()
+        }
+    }
+
+    private func prepareForSelectedTabChange() {
+        isEditingAddress = false
+    }
+
+    private func renderTabs() {
+        let presentations = tabManager.presentations
+        guard presentations != renderedTabPresentations else {
+            return
+        }
+        renderedTabPresentations = presentations
+        chromeView.tabStrip.update(presentations)
+    }
+
+    @objc
     func submitAddress(_ sender: Any?) {
         switch addressInterpreter.interpret(chromeView.addressField.stringValue) {
         case let .navigate(url):
@@ -277,39 +467,27 @@ final class BrowserWindowController: NSWindowController,
 
     @objc
     func goBack(_ sender: Any?) {
-        guard let webView, webView.canGoBack else {
+        let tab = tabManager.selectedTab
+        guard let webView = tab.webView, webView.canGoBack else {
             return
         }
-        hideError()
-        beginContentBlockingNavigationRequest()
-        let navigation = BrowserPerformanceSignposts.signposter.withIntervalSignpost(
-            "BrowserCommand"
-        ) {
-            webView.goBack()
-        }
-        bindContentBlockingNavigation(navigation)
+        tab.goBack()
         window?.makeFirstResponder(webView)
     }
 
     @objc
     func goForward(_ sender: Any?) {
-        guard let webView, webView.canGoForward else {
+        let tab = tabManager.selectedTab
+        guard let webView = tab.webView, webView.canGoForward else {
             return
         }
-        hideError()
-        beginContentBlockingNavigationRequest()
-        let navigation = BrowserPerformanceSignposts.signposter.withIntervalSignpost(
-            "BrowserCommand"
-        ) {
-            webView.goForward()
-        }
-        bindContentBlockingNavigation(navigation)
+        tab.goForward()
         window?.makeFirstResponder(webView)
     }
 
     @objc
     func reloadOrStop(_ sender: Any?) {
-        if webView?.isLoading == true {
+        if tabManager.selectedTab.observedIsLoading {
             stopLoading(sender)
         } else {
             reloadPage(sender)
@@ -318,60 +496,31 @@ final class BrowserWindowController: NSWindowController,
 
     @objc
     func reloadPage(_ sender: Any?) {
-        guard let webView, !webView.isLoading else {
+        let tab = tabManager.selectedTab
+        guard let webView = tab.webView, !webView.isLoading else {
             return
         }
-        if !chromeView.errorView.isHidden, errorAllowsRetry {
-            retryNavigation(sender)
-            return
-        }
-        let reloadURL = committedURL ?? webView.url ?? observedURL
-        guard prepareContentBlockingPolicyForNavigation(to: reloadURL) else {
-            presentContentBlockingUnavailable()
-            return
-        }
-        hideError()
-        beginContentBlockingNavigationRequest()
-        let navigation = BrowserPerformanceSignposts.signposter.withIntervalSignpost(
-            "BrowserCommand"
-        ) {
-            webView.reload()
-        }
-        bindContentBlockingNavigation(navigation)
+        tab.reload()
         window?.makeFirstResponder(webView)
     }
 
     @objc
     func stopLoading(_ sender: Any?) {
-        guard let webView, webView.isLoading else {
+        let tab = tabManager.selectedTab
+        guard let webView = tab.webView, webView.isLoading else {
             return
         }
-        BrowserPerformanceSignposts.signposter.withIntervalSignpost(
-            "BrowserCommand"
-        ) {
-            webView.stopLoading()
-        }
-        applyContentBlockingPolicyForCommittedPage(
-            in: webView,
-            mode: contentBlockingNavigationState.cancelLatest()
-        )
+        tab.stopLoading()
     }
 
     @objc
     func retryNavigation(_ sender: Any?) {
-        if let retryURL {
-            navigate(to: retryURL)
-        } else if let webView, webView.url != nil {
-            let reloadURL = committedURL ?? webView.url
-            guard prepareContentBlockingPolicyForNavigation(to: reloadURL) else {
-                presentContentBlockingUnavailable()
-                return
+        let tab = tabManager.selectedTab
+        if tab.retryURL != nil || tab.webView?.url != nil {
+            tab.retry()
+            if let webView = tab.webView {
+                window?.makeFirstResponder(webView)
             }
-            hideError()
-            beginContentBlockingNavigationRequest()
-            let navigation = webView.reload()
-            bindContentBlockingNavigation(navigation)
-            window?.makeFirstResponder(webView)
         } else {
             focusAddressField()
         }
@@ -434,13 +583,26 @@ final class BrowserWindowController: NSWindowController,
 
     @objc
     func toggleContentBlockingForCurrentSiteAndReload(_ sender: Any?) {
+        let tab = tabManager.selectedTab
         guard
             let contentBlockingCoordinator,
-            let webView,
-            !contentBlockingNavigationState.hasActiveNavigation,
-            let url = committedURL,
-            contentBlockingCoordinator.toggleException(for: url) != nil
+            tab.webView != nil,
+            !tab.hasActiveNavigation,
+            let url = tab.committedURL,
+            let site = ContentBlockerSite(url: url)
         else {
+            NSSound.beep()
+            return
+        }
+        let hasAffectedActiveTab = tabManager.tabs.contains {
+            $0.hasActiveNavigation
+                && contentBlockingURL(in: $0, matching: site) != nil
+        }
+        guard !hasAffectedActiveTab else {
+            NSSound.beep()
+            return
+        }
+        guard contentBlockingCoordinator.toggleException(for: url) != nil else {
             NSSound.beep()
             return
         }
@@ -448,33 +610,30 @@ final class BrowserWindowController: NSWindowController,
         // navigation preparation. Apply the selected exact-host policy before
         // reloading so an exception can recover even when a production rule
         // blocks the main document itself.
-        guard applyContentBlockingPolicy(
-            for: url,
-            in: webView,
-            mode: .exact
-        ) else {
+        guard tab.applyExactPolicyAndReload() else {
             _ = contentBlockingCoordinator.toggleException(for: url)
-            _ = applyContentBlockingPolicy(
-                for: url,
-                in: webView,
-                mode: .exact
-            )
+            _ = tab.restoreExactPolicyForCommittedPage()
             NSSound.beep()
             return
         }
-        hideError()
-        beginContentBlockingNavigationRequest()
-        guard let navigation = webView.reload() else {
-            _ = contentBlockingCoordinator.toggleException(for: url)
-            applyContentBlockingPolicyForCommittedPage(
-                in: webView,
-                mode: contentBlockingNavigationState.cancelLatest()
-            )
-            NSSound.beep()
-            return
+        for otherTab in tabManager.tabs where otherTab !== tab {
+            if otherTab.hasActiveNavigation {
+                guard let affectedURL = contentBlockingURL(
+                    in: otherTab,
+                    matching: site
+                ) else {
+                    continue
+                }
+                _ = otherTab.strengthenPolicy(for: affectedURL)
+            } else if
+                otherTab.committedURL.flatMap(ContentBlockerSite.init(url:))
+                    == site,
+                !otherTab.applyExactPolicyAndReload()
+            {
+                _ = otherTab.restoreExactPolicyForCommittedPage()
+            }
         }
-        bindContentBlockingNavigation(navigation)
-        window?.makeFirstResponder(webView)
+        window?.makeFirstResponder(tab.webView)
         updatePrivacyBlockingResetState(
             isBusy: false,
             statusMessage: nil
@@ -560,8 +719,6 @@ final class BrowserWindowController: NSWindowController,
     }
 
     func windowWillClose(_ notification: Notification) {
-        finishFirstBlankNavigation(accessibilityValue: "Cancelled")
-        finishSubmittedNavigation(accessibilityValue: "Cancelled")
         bookmarkCoordinator?.cancel()
         bookmarkManagerWindowController?.close()
         websiteDataPrivacyWindowController?.close()
@@ -573,448 +730,51 @@ final class BrowserWindowController: NSWindowController,
         {
             parentWindow.endSheet(editorWindow)
         }
-        observations.forEach { $0.invalidate() }
-        observations.removeAll()
-        for webView in webViews {
-            contentBlockingCoordinator?.forget(
-                webView.configuration.userContentController
-            )
-            webView.navigationDelegate = nil
-            webView.uiDelegate = nil
+        for tab in tabManager.closeAll() {
+            tab.close()
         }
-    }
-
-    func webView(
-        _ webView: WKWebView,
-        decidePolicyFor navigationAction: WKNavigationAction,
-        decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
-    ) {
-        // A nil target frame is a request for a new browsing context. It must
-        // not change the content-blocking policy of the committed page before
-        // the UI delegate denies or deliberately routes that request.
-        let isMainFrame = navigationAction.targetFrame?.isMainFrame == true
-        switch NavigationPolicy.decision(
-            for: navigationAction.request.url,
-            isMainFrame: isMainFrame
-        ) {
-        case .allow:
-            if isMainFrame {
-                if ContentBlockingNavigationURL.isFragmentOnlyNavigation(
-                    from: currentDocumentURL
-                        ?? navigationAction.sourceFrame.request.url
-                        ?? webView.url,
-                    to: navigationAction.request.url
-                ) {
-                    if webView === self.webView {
-                        currentDocumentURL = navigationAction.request.url
-                        applyContentBlockingPolicyForCommittedPage(
-                            in: webView,
-                            mode: contentBlockingNavigationState
-                                .resolveSameDocumentAction()
-                        )
-                        retryURL = navigationAction.request.url
-                    }
-                    decisionHandler(.allow)
-                    return
-                }
-                guard prepareContentBlockingPolicyForNavigation(
-                    to: navigationAction.request.url,
-                    in: webView
-                ) else {
-                    decisionHandler(.cancel)
-                    if webView === self.webView {
-                        _ = contentBlockingNavigationState.cancelAwaitingRequest()
-                    }
-                    presentContentBlockingUnavailable()
-                    return
-                }
-                if webView === self.webView {
-                    _ = contentBlockingNavigationState.approveAction()
-                }
-                retryURL = navigationAction.request.url
-            }
-            decisionHandler(.allow)
-        case .cancel:
-            decisionHandler(.cancel)
-            if isMainFrame, webView === self.webView {
-                applyContentBlockingPolicyForCommittedPage(
-                    in: webView,
-                    mode: contentBlockingNavigationState.cancelAwaitingRequest()
-                )
-                presentUnsupportedNavigation(url: navigationAction.request.url)
-            }
-        }
-    }
-
-    func webView(
-        _ webView: WKWebView,
-        decidePolicyFor navigationResponse: WKNavigationResponse,
-        decisionHandler: @escaping @MainActor (WKNavigationResponsePolicy) -> Void
-    ) {
-        guard navigationResponse.canShowMIMEType else {
-            decisionHandler(.cancel)
-            if navigationResponse.isForMainFrame, webView === self.webView {
-                applyContentBlockingPolicyForCommittedPage(
-                    in: webView,
-                    mode: contentBlockingNavigationState.cancelLatest()
-                )
-                finishFirstBlankNavigation(accessibilityValue: "Failed")
-                finishSubmittedNavigation(accessibilityValue: "Failed")
-                presentError(
-                    title: "Download Not Available",
-                    message: "File downloads will be added during browser hardening.",
-                    recoveryActionTitle: nil
-                )
-            }
-            return
-        }
-        decisionHandler(.allow)
-    }
-
-    func webView(
-        _ webView: WKWebView,
-        createWebViewWith configuration: WKWebViewConfiguration,
-        for navigationAction: WKNavigationAction,
-        windowFeatures: WKWindowFeatures
-    ) -> WKWebView? {
-        guard navigationAction.targetFrame == nil else {
-            return nil
-        }
-        // WebKit reports both a physical anchor click and JavaScript's
-        // anchor.click() as linkActivated. Route only an unmodified primary-
-        // button click on an HTTP(S) anchor. Scripted, keyboard, modified,
-        // middle-button, and non-web-scheme requests remain denied.
-        guard NewContextNavigationPolicy.shouldRouteInCurrentPage(
-            url: navigationAction.request.url,
-            isLinkActivation: navigationAction.navigationType == .linkActivated,
-            buttonNumber: navigationAction.buttonNumber,
-            modifierFlags: navigationAction.modifierFlags
-        ) else {
-            return nil
-        }
-
-        if let url = navigationAction.request.url {
-            navigate(to: url)
-        }
-        return nil
-    }
-
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        guard webView === self.webView else {
-            return
-        }
-        bindContentBlockingNavigation(navigation)
-        hideError()
-        synchronizeObservedState(from: webView, includeURL: false)
-        webView.setAccessibilityValue("Loading")
-    }
-
-    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        guard webView === self.webView else {
-            return
-        }
-        committedURL = webView.url
-        currentDocumentURL = webView.url
-        applyContentBlockingPolicyForCommittedPage(
-            in: webView,
-            mode: contentBlockingNavigationState.commit(
-                navigation
-            )
-        )
-        synchronizeObservedState(from: webView)
-    }
-
-    func webView(
-        _ webView: WKWebView,
-        didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!
-    ) {
-        guard webView === self.webView else {
-            return
-        }
-        bindContentBlockingRedirect(navigation)
-        retryURL = webView.url
-        guard prepareContentBlockingPolicyForNavigation(
-            to: webView.url,
-            in: webView
-        ) else {
-            webView.stopLoading()
-            presentContentBlockingUnavailable()
-            return
-        }
-        synchronizeObservedState(from: webView)
-    }
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard webView === self.webView else {
-            return
-        }
-
-        synchronizeObservedState(from: webView)
-        webView.setAccessibilityValue("Ready")
-        finishFirstNavigationIfNeeded(navigation)
-        finishSubmittedNavigationIfNeeded(navigation)
-    }
-
-    func webView(
-        _ webView: WKWebView,
-        didFail navigation: WKNavigation!,
-        withError error: any Error
-    ) {
-        handleNavigationFailure(webView: webView, navigation: navigation, error: error)
-    }
-
-    func webView(
-        _ webView: WKWebView,
-        didFailProvisionalNavigation navigation: WKNavigation!,
-        withError error: any Error
-    ) {
-        handleNavigationFailure(webView: webView, navigation: navigation, error: error)
-    }
-
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        guard webView === self.webView else {
-            return
-        }
-        applyContentBlockingPolicyForCommittedPage(
-            in: webView,
-            mode: contentBlockingNavigationState.cancelLatest()
-        )
-        finishFirstBlankNavigation(accessibilityValue: "Failed")
-        finishSubmittedNavigation(accessibilityValue: "Failed")
-        show(
-            BrowserErrorPresentation.from(
-                error: BrowserPageError.webContentProcessTerminated,
-                attemptedURL: retryURL ?? webView.url
-            )
-        )
-    }
-
-    private func configurePrimaryWebView(_ webView: WKWebView) {
-        webView.translatesAutoresizingMaskIntoConstraints = false
-        webView.navigationDelegate = self
-        webView.uiDelegate = self
-        webView.setAccessibilityIdentifier("BrowserWebView")
-        webView.setAccessibilityLabel("Web page")
-        webView.setAccessibilityValue("Loading")
-        install(webView, positioned: .below, relativeTo: chromeView.errorView)
-        beginObserving(webView)
-    }
-
-    private func makeWebView(
-        profile: BrowserProfile,
-        applyingContentBlockingFor url: URL
-    ) -> WKWebView? {
-        guard let contentBlockingCoordinator else {
-            return profile.webViewFactory.makeWebView()
-        }
-        let contentController = WKUserContentController()
-        guard contentBlockingCoordinator.applyPolicy(
-            to: contentController,
-            for: url
-        ) else {
-            return nil
-        }
-        return profile.webViewFactory.makeWebView(
-            userContentController: contentController
-        )
-    }
-
-    private func install(
-        _ webView: WKWebView,
-        positioned placement: NSWindow.OrderingMode,
-        relativeTo otherView: NSView
-    ) {
-        webView.translatesAutoresizingMaskIntoConstraints = false
-        chromeView.pageContainer.addSubview(
-            webView,
-            positioned: placement,
-            relativeTo: otherView
-        )
-        NSLayoutConstraint.activate([
-            webView.topAnchor.constraint(equalTo: chromeView.pageContainer.topAnchor),
-            webView.leadingAnchor.constraint(equalTo: chromeView.pageContainer.leadingAnchor),
-            webView.trailingAnchor.constraint(equalTo: chromeView.pageContainer.trailingAnchor),
-            webView.bottomAnchor.constraint(equalTo: chromeView.pageContainer.bottomAnchor),
-        ])
-    }
-
-    private func beginObserving(_ webView: WKWebView) {
-        observations = [
-            webView.observe(\.url, options: [.initial, .new]) {
-                [weak self, weak observed = webView] _, _ in
-                Task { @MainActor [weak self, weak observed] in
-                    self?.observedURL = observed?.url
-                    self?.renderDisplayedURL()
-                    self?.renderBookmarkState()
-                }
-            },
-            webView.observe(\.title, options: [.initial, .new]) {
-                [weak self, weak observed = webView] _, _ in
-                Task { @MainActor [weak self, weak observed] in
-                    self?.observedTitle = observed?.title
-                    self?.renderWindowTitle()
-                    self?.renderBookmarkState()
-                }
-            },
-            webView.observe(\.estimatedProgress, options: [.initial, .new]) {
-                [weak self, weak observed = webView] _, _ in
-                Task { @MainActor [weak self, weak observed] in
-                    self?.observedProgress = observed?.estimatedProgress ?? 0
-                    self?.renderProgress()
-                }
-            },
-            webView.observe(\.isLoading, options: [.initial, .new]) {
-                [weak self, weak observed = webView] _, _ in
-                Task { @MainActor [weak self, weak observed] in
-                    self?.observedIsLoading = observed?.isLoading ?? false
-                    self?.renderLoadingState()
-                    self?.renderBookmarkState()
-                }
-            },
-            webView.observe(\.canGoBack, options: [.initial, .new]) {
-                [weak self, weak observed = webView] _, _ in
-                Task { @MainActor [weak self, weak observed] in
-                    self?.observedCanGoBack = observed?.canGoBack ?? false
-                    self?.renderNavigationState()
-                }
-            },
-            webView.observe(\.canGoForward, options: [.initial, .new]) {
-                [weak self, weak observed = webView] _, _ in
-                Task { @MainActor [weak self, weak observed] in
-                    self?.observedCanGoForward = observed?.canGoForward ?? false
-                    self?.renderNavigationState()
-                }
-            },
-        ]
+        profile = nil
     }
 
     private func navigate(to url: URL) {
-        guard let webView else {
-            if contentBlockingCoordinator?.availability == .preparing {
-                pendingNavigationURL = url
-                retryURL = url
-                isEditingAddress = false
-                observedURL = url
-                renderDisplayedURL()
-                hideError()
-                return
-            }
-            if contentBlockingCoordinator?.availability == .unavailable {
-                pendingNavigationURL = url
-                retryURL = url
-                presentContentBlockingUnavailable()
-                return
-            }
-            presentError(
-                title: "Browser Isn’t Ready",
-                message: "Wait a moment and try again.",
-                recoveryActionTitle: nil
-            )
-            return
-        }
-
-        guard prepareContentBlockingPolicyForNavigation(to: url) else {
+        let tab = tabManager.selectedTab
+        if profile == nil,
+           contentBlockingCoordinator?.availability == .unavailable
+        {
             presentContentBlockingUnavailable()
             return
         }
 
-        finishSubmittedNavigation(accessibilityValue: "Cancelled")
-        retryURL = url
         isEditingAddress = false
-        observedURL = url
+        _ = tab.navigate(to: url)
         renderDisplayedURL()
-        hideError()
-        submittedNavigationState = BrowserPerformanceSignposts.signposter.beginInterval(
-            "LocalFixtureNavigation"
-        )
-        beginContentBlockingNavigationRequest()
-        let navigation = BrowserPerformanceSignposts.signposter.withIntervalSignpost(
-            "AddressSubmission"
-        ) {
-            webView.load(URLRequest(url: url))
+        if let webView = tab.webView {
+            window?.makeFirstResponder(webView)
         }
-        submittedNavigation = navigation
-        bindContentBlockingNavigation(navigation)
-        if submittedNavigation == nil {
-            finishSubmittedNavigation(accessibilityValue: "Failed")
-        }
-        window?.makeFirstResponder(webView)
-    }
-
-    private func applyContentBlockingPolicy(
-        for url: URL?,
-        in targetWebView: WKWebView? = nil,
-        mode: ContentBlockingPolicyApplicationMode = .exact
-    ) -> Bool {
-        guard let contentBlockingCoordinator else {
-            return true
-        }
-        guard let targetWebView = targetWebView ?? webView else {
-            return false
-        }
-        return contentBlockingCoordinator.applyPolicy(
-            to: targetWebView.configuration.userContentController,
-            for: url,
-            mode: mode
-        )
-    }
-
-    private func prepareContentBlockingPolicyForNavigation(
-        to url: URL?,
-        in targetWebView: WKWebView? = nil
-    ) -> Bool {
-        applyContentBlockingPolicy(
-            for: url,
-            in: targetWebView,
-            mode: .strengthenOnly
-        )
-    }
-
-    private func applyContentBlockingPolicyForCommittedPage(
-        in targetWebView: WKWebView,
-        mode: ContentBlockingPolicyApplicationMode
-    ) {
-        guard mode != .none else {
-            return
-        }
-        guard applyContentBlockingPolicy(
-            for: committedURL,
-            in: targetWebView,
-            mode: mode
-        ) else {
-            presentContentBlockingUnavailable()
-            return
-        }
-    }
-
-    private func beginContentBlockingNavigationRequest() {
-        _ = contentBlockingNavigationState.beginRequest()
-    }
-
-    private func bindContentBlockingNavigation(_ navigation: WKNavigation?) {
-        guard let navigation else {
-            guard let webView else {
-                _ = contentBlockingNavigationState.cancelLatest()
-                return
-            }
-            applyContentBlockingPolicyForCommittedPage(
-                in: webView,
-                mode: contentBlockingNavigationState.cancelLatest()
-            )
-            return
-        }
-        _ = contentBlockingNavigationState.bind(navigation)
-    }
-
-    private func bindContentBlockingRedirect(_ navigation: WKNavigation?) {
-        guard let navigation else {
-            return
-        }
-        _ = contentBlockingNavigationState.bindRedirect(navigation)
     }
 
     private var currentContentBlockingURL: URL? {
-        committedURL ?? pendingNavigationURL ?? observedURL ?? webView?.url
+        tabManager.selectedTab.currentContentBlockingURL
+    }
+
+    private func contentBlockingURL(
+        in tab: TabController,
+        matching site: ContentBlockerSite
+    ) -> URL? {
+        contentBlockingURLs(in: tab).first {
+            ContentBlockerSite(url: $0) == site
+        }
+    }
+
+    private func contentBlockingURLs(in tab: TabController) -> [URL] {
+        [
+            tab.retryURL,
+            tab.pendingNavigationURL,
+            tab.observedURL,
+            tab.committedURL,
+            tab.currentDocumentURL,
+            tab.webView?.url,
+        ].compactMap { $0 }
     }
 
     private var contentBlockingStatusTitle: String {
@@ -1060,9 +820,9 @@ final class BrowserWindowController: NSWindowController,
         case .active, .activeLastValidRules:
             guard
                 let site = snapshot.site,
-                committedURL != nil,
-                webView != nil,
-                !contentBlockingNavigationState.hasActiveNavigation
+                tabManager.selectedTab.committedURL != nil,
+                tabManager.selectedTab.webView != nil,
+                !tabManager.selectedTab.hasActiveNavigation
             else {
                 return ("No Website Selected", false)
             }
@@ -1072,7 +832,7 @@ final class BrowserWindowController: NSWindowController,
     }
 
     private func presentContentBlockingUnavailable() {
-        presentError(
+        tabManager.selectedTab.presentError(
             title: "Privacy Protection Unavailable",
             message: "Browser could not load a valid ad and tracker blocking ruleset. Navigation remains paused to avoid loading a page without the expected protection.",
             recoveryActionTitle: nil
@@ -1083,6 +843,8 @@ final class BrowserWindowController: NSWindowController,
         guard !isEditingAddress else {
             return
         }
+        let observedURL = tabManager.selectedTab.observedURL
+            ?? tabManager.selectedTab.pendingNavigationURL
         guard let observedURL, observedURL.absoluteString != "about:blank" else {
             chromeView.addressField.stringValue = ""
             return
@@ -1091,6 +853,7 @@ final class BrowserWindowController: NSWindowController,
     }
 
     private func renderWindowTitle() {
+        let observedTitle = tabManager.selectedTab.observedTitle
         guard let observedTitle, !observedTitle.isEmpty else {
             window?.title = "Browser"
             return
@@ -1099,38 +862,51 @@ final class BrowserWindowController: NSWindowController,
     }
 
     private func renderProgress() {
-        chromeView.progressIndicator.doubleValue = observedProgress
+        chromeView.progressIndicator.doubleValue =
+            tabManager.selectedTab.observedProgress
     }
 
     private func renderLoadingState() {
-        chromeView.progressIndicator.isHidden = !observedIsLoading
-        chromeView.updateReloadStopButton(isLoading: observedIsLoading)
+        let isLoading = tabManager.selectedTab.observedIsLoading
+        chromeView.progressIndicator.isHidden = !isLoading
+        chromeView.updateReloadStopButton(isLoading: isLoading)
     }
 
     private func renderNavigationState() {
-        chromeView.backButton.isEnabled = observedCanGoBack
-        chromeView.forwardButton.isEnabled = observedCanGoForward
+        chromeView.backButton.isEnabled =
+            tabManager.selectedTab.observedCanGoBack
+        chromeView.forwardButton.isEnabled =
+            tabManager.selectedTab.observedCanGoForward
         chromeView.reloadStopButton.isEnabled = webView != nil
     }
 
-    private func synchronizeObservedState(
-        from webView: WKWebView,
-        includeURL: Bool = true
-    ) {
-        if includeURL {
-            observedURL = webView.url
-        }
-        observedTitle = webView.title
-        observedProgress = webView.estimatedProgress
-        observedIsLoading = webView.isLoading
-        observedCanGoBack = webView.canGoBack
-        observedCanGoForward = webView.canGoForward
+    private func renderSelectedTab() {
         renderDisplayedURL()
         renderWindowTitle()
         renderProgress()
         renderLoadingState()
         renderNavigationState()
+        renderSelectedError()
         renderBookmarkState()
+    }
+
+    private func renderSelectedError() {
+        guard let errorState = tabManager.selectedTab.errorState else {
+            chromeView.errorView.isHidden = true
+            return
+        }
+        chromeView.errorView.update(
+            title: errorState.title,
+            message: errorState.message,
+            host: nil,
+            recoveryActionTitle: errorState.recoveryActionTitle
+        )
+        chromeView.errorView.isHidden = false
+        chromeView.pageContainer.addSubview(
+            chromeView.errorView,
+            positioned: .above,
+            relativeTo: tabManager.selectedTab.webView
+        )
     }
 
     private var bookmarkedCurrentPage: Bookmark? {
@@ -1196,17 +972,22 @@ final class BrowserWindowController: NSWindowController,
             return
         }
 
-        let currentWasExcepted = contentBlockingCoordinator.snapshot(
-            for: committedURL
-        ).isException
-        if currentWasExcepted,
-           (contentBlockingNavigationState.hasActiveNavigation
-                || webView == nil
-                || committedURL == nil)
-        {
+        let affectedTabs = tabManager.tabs.filter {
+            $0.committedURL != nil
+                && contentBlockingCoordinator.snapshot(
+                    for: $0.committedURL
+                ).isException
+        }
+        let hasAffectedActiveTab = tabManager.tabs.contains { tab in
+            tab.hasActiveNavigation
+                && contentBlockingURLs(in: tab).contains {
+                    contentBlockingCoordinator.snapshot(for: $0).isException
+                }
+        }
+        if hasAffectedActiveTab {
             updatePrivacyBlockingResetState(
                 isBusy: false,
-                statusMessage: "Wait for the current navigation to finish, then reset the exceptions."
+                statusMessage: "Wait for the affected tab navigation to finish, then reset the exceptions."
             )
             return
         }
@@ -1220,31 +1001,28 @@ final class BrowserWindowController: NSWindowController,
         var statusMessage = previousCount == 1
             ? "The site exception was reset."
             : "All \(previousCount) site exceptions were reset."
-        if currentWasExcepted,
-           let webView,
-           let committedURL
-        {
-            guard applyContentBlockingPolicy(
-                for: committedURL,
-                in: webView,
-                mode: .exact
-            ) else {
-                presentContentBlockingUnavailable()
-                updatePrivacyBlockingResetState(
-                    isBusy: false,
-                    statusMessage: "The exceptions were reset, but protection could not be attached to the current page."
-                )
-                return
+        var reloadCount = 0
+        var failedCount = 0
+        for tab in tabManager.tabs where tab.webView != nil {
+            if !tab.strengthenProtection() {
+                failedCount += 1
             }
-            hideError()
-            beginContentBlockingNavigationRequest()
-            let navigation = webView.reload()
-            bindContentBlockingNavigation(navigation)
-            if navigation == nil {
-                statusMessage += " Protection is attached; reload the current page manually."
+        }
+        for tab in affectedTabs {
+            if tab.applyExactPolicyAndReload() {
+                reloadCount += 1
             } else {
-                statusMessage += " The current page is reloading with protection enabled."
+                _ = tab.restoreExactPolicyForCommittedPage()
+                failedCount += 1
             }
+        }
+        if reloadCount == 1 {
+            statusMessage += " The affected tab is reloading with protection enabled."
+        } else if reloadCount > 1 {
+            statusMessage += " \(reloadCount) affected tabs are reloading with protection enabled."
+        }
+        if failedCount > 0 {
+            statusMessage += " Protection is attached to \(failedCount) other affected tab(s); reload them manually."
         }
 
         updatePrivacyBlockingResetState(
@@ -1494,94 +1272,8 @@ final class BrowserWindowController: NSWindowController,
         return editor
     }
 
-    private func handleNavigationFailure(
-        webView: WKWebView,
-        navigation: WKNavigation?,
-        error: any Error
-    ) {
-        guard webView === self.webView else {
-            return
-        }
-
-        let disposition = contentBlockingNavigationState.fail(navigation)
-        guard case let .current(mode) = disposition else {
-            finishFirstNavigationIfNeeded(
-                navigation,
-                accessibilityValue: nil
-            )
-            finishSubmittedNavigationIfNeeded(
-                navigation,
-                accessibilityValue: nil
-            )
-            return
-        }
-        applyContentBlockingPolicyForCommittedPage(in: webView, mode: mode)
-        synchronizeObservedState(from: webView)
-        finishFirstNavigationIfNeeded(
-            navigation,
-            accessibilityValue: "Failed"
-        )
-        finishSubmittedNavigationIfNeeded(navigation, accessibilityValue: "Failed")
-        show(
-            BrowserErrorPresentation.from(
-                error: error,
-                attemptedURL: retryURL ?? webView.url
-            )
-        )
-    }
-
-    private func finishFirstNavigationIfNeeded(
-        _ navigation: WKNavigation?,
-        accessibilityValue: String? = "Ready"
-    ) {
-        guard navigation === firstBlankNavigation else {
-            return
-        }
-        finishFirstBlankNavigation(accessibilityValue: accessibilityValue)
-    }
-
-    private func finishFirstBlankNavigation(accessibilityValue: String?) {
-        guard let state = firstBlankNavigationState else {
-            return
-        }
-        BrowserPerformanceSignposts.signposter.endInterval(
-            "FirstBlankNavigation",
-            state
-        )
-        firstBlankNavigation = nil
-        firstBlankNavigationState = nil
-        if let accessibilityValue {
-            webView?.setAccessibilityValue(accessibilityValue)
-        }
-    }
-
-    private func finishSubmittedNavigationIfNeeded(
-        _ navigation: WKNavigation?,
-        accessibilityValue: String? = "Ready"
-    ) {
-        guard navigation === submittedNavigation else {
-            return
-        }
-        finishSubmittedNavigation(accessibilityValue: accessibilityValue)
-    }
-
-    private func finishSubmittedNavigation(accessibilityValue: String?) {
-        guard let state = submittedNavigationState else {
-            return
-        }
-        BrowserPerformanceSignposts.signposter.endInterval(
-            "LocalFixtureNavigation",
-            state
-        )
-        submittedNavigation = nil
-        submittedNavigationState = nil
-        if let accessibilityValue {
-            webView?.setAccessibilityValue(accessibilityValue)
-        }
-    }
-
     private func presentAddressError(_ error: AddressInterpretationError) {
-        retryURL = nil
+        tabManager.selectedTab.clearRetryURL()
         switch error {
         case .emptyInput:
             presentError(
@@ -1604,54 +1296,16 @@ final class BrowserWindowController: NSWindowController,
         }
     }
 
-    private func presentUnsupportedNavigation(url: URL?) {
-        let scheme = url?.scheme?.lowercased()
-        presentError(
-            title: "Unsupported Address",
-            message: scheme.map {
-                "Browser blocked the \($0) scheme. Only HTTP and HTTPS navigation is supported."
-            } ?? "Browser blocked a navigation without a valid HTTP or HTTPS address.",
-            recoveryActionTitle: nil
-        )
-    }
-
-    private func show(_ presentation: BrowserErrorPresentation?) {
-        guard let presentation else {
-            return
-        }
-        presentError(
-            title: presentation.title,
-            message: presentation.message,
-            recoveryActionTitle: presentation.recoveryActionTitle
-        )
-    }
-
     private func presentError(
         title: String,
         message: String,
         recoveryActionTitle: String?
     ) {
-        errorAllowsRetry = recoveryActionTitle != nil
-        chromeView.errorView.update(
+        tabManager.selectedTab.presentError(
             title: title,
             message: message,
-            host: nil,
             recoveryActionTitle: recoveryActionTitle
         )
-        chromeView.errorView.isHidden = false
-        chromeView.pageContainer.addSubview(
-            chromeView.errorView,
-            positioned: .above,
-            relativeTo: webView
-        )
-        webView?.setAccessibilityValue("Failed")
-        renderBookmarkState()
-    }
-
-    private func hideError() {
-        chromeView.errorView.isHidden = true
-        errorAllowsRetry = false
-        renderBookmarkState()
     }
 
     private static func setAccessibilityIdentifier(

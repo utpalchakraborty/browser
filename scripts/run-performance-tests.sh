@@ -112,6 +112,9 @@ xcodebuild \
     -only-testing:BrowserPerformanceTests/BrowserLaunchPerformanceTests/testDeterministicLocalNavigationAndCommandResponse \
     -only-testing:BrowserPerformanceTests/BrowserLaunchPerformanceTests/testBackAndForwardCommandResponse \
     -only-testing:BrowserPerformanceTests/BrowserLaunchPerformanceTests/testControlledScrollingResponsiveness \
+    -only-testing:BrowserPerformanceTests/BrowserLaunchPerformanceTests/testNewBlankTabChromeResponse \
+    -only-testing:BrowserPerformanceTests/BrowserLaunchPerformanceTests/testSwitchBetweenTenResidentTabs \
+    -only-testing:BrowserPerformanceTests/BrowserLaunchPerformanceTests/testOneHundredBlankTabOpenCloseCycles \
     -resultBundlePath "$interaction_result_bundle" \
     test-without-building
 

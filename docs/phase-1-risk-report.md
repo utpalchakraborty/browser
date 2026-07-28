@@ -71,17 +71,19 @@ sources as a distribution-ready pipeline.
 There is no launch-time, scheduled, or silent filter update. A future updater
 would require a separate privacy, integrity, rollback, and performance review.
 
-## Known limitations and later ownership
+## Phase 1 limitations and later ownership
 
 - Phase 1 has disposable native chrome, not the Phase 2 address field or
   navigation controls. The address-field focus launch gate becomes directly
   enforceable in Phase 2.
-- Popup creation works at the API boundary. Phase 2 suppresses scripted popup
-  requests and routes a direct pointer-activated target-blank HTTP/HTTPS anchor
-  into the current page. Phase 4 makes denial of scripted `window.open`,
+- Popup creation works at the API boundary. Phase 2 suppressed scripted popup
+  requests and routed a direct pointer-activated target-blank HTTP/HTTPS anchor
+  into the current page. Phase 4 made denial of scripted `window.open`,
   target-blank forms, separate windows/WKWebViews, background contexts, and
-  tab-unders an explicit regression gate independent of content blocking.
-  Phase 5 may route only the direct anchor case to a foreground tab.
+  tab-unders an explicit regression gate independent of content blocking. Phase
+  5 now routes an unmodified direct anchor to a foreground tab and an exact
+  physical Command-click on an HTTP/HTTPS anchor to a background tab while
+  retaining the scripted-popup denial boundary.
 - Download and HTTP-authentication primitives work, but visible destination and
   credential UI remain daily-driver hardening.
 - The content-process probe uses temporal before/after attribution and SIGTERM,
@@ -104,10 +106,10 @@ would require a separate privacy, integrity, rollback, and performance review.
   interval, exited successfully, reported exactly zero captured/kernel-dropped
   packets, and reported equal received and metadata-filter-drop counts. Other
   malformed or inconsistent captures fail closed.
-- Repeated view teardown and leak inspection are intentionally moved to Phase
-  5's real TabController and 100-cycle churn gate. Phase 1's one- and ten-view
-  results cover fixed/resident cost; an artificial disposable teardown path
-  would not validate the production observer and delegate ownership graph.
+- Repeated view teardown and leak inspection moved to Phase 5's real
+  TabController and 100-cycle churn gate. Phase 1's one- and ten-view results
+  cover fixed/resident cost; an artificial disposable teardown path would not
+  validate the production observer and delegate ownership graph.
 
 ## Commands
 

@@ -91,18 +91,56 @@ final class NavigationPolicyTests: XCTestCase {
         }
     }
 
-    func testNewContextPolicyRoutesOnlyUnmodifiedPrimaryHTTPLinks() {
+    func testUnmodifiedPrimaryWebLinkTargetsForegroundTabOnlyForNewContext() {
         for url in [
             URL(string: "http://example.com/path"),
             URL(string: "HTTPS://example.com/path"),
         ] {
-            XCTAssertTrue(
-                NewContextNavigationPolicy.shouldRouteInCurrentPage(
+            XCTAssertEqual(
+                NewContextNavigationPolicy.disposition(
                     url: url,
                     isLinkActivation: true,
                     buttonNumber: 1,
-                    modifierFlags: []
-                )
+                    modifierFlags: [],
+                    requestsNewContext: true
+                ),
+                .foregroundTab
+            )
+            XCTAssertEqual(
+                NewContextNavigationPolicy.disposition(
+                    url: url,
+                    isLinkActivation: true,
+                    buttonNumber: 1,
+                    modifierFlags: [],
+                    requestsNewContext: false
+                ),
+                .continueInCurrentFrame
+            )
+        }
+    }
+
+    func testExactCommandPrimaryWebLinkTargetsBackgroundTab() {
+        let url = URL(string: "https://example.com/path")
+        for requestsNewContext in [false, true] {
+            XCTAssertEqual(
+                NewContextNavigationPolicy.disposition(
+                    url: url,
+                    isLinkActivation: true,
+                    buttonNumber: 1,
+                    modifierFlags: [.command],
+                    requestsNewContext: requestsNewContext
+                ),
+                .backgroundTab
+            )
+            XCTAssertEqual(
+                NewContextNavigationPolicy.disposition(
+                    url: url,
+                    isLinkActivation: true,
+                    buttonNumber: 1,
+                    modifierFlags: [.command, .capsLock],
+                    requestsNewContext: requestsNewContext
+                ),
+                .backgroundTab
             )
         }
     }
@@ -118,13 +156,15 @@ final class NavigationPolicyTests: XCTestCase {
         ]
 
         for url in cases {
-            XCTAssertFalse(
-                NewContextNavigationPolicy.shouldRouteInCurrentPage(
+            XCTAssertEqual(
+                NewContextNavigationPolicy.disposition(
                     url: url,
                     isLinkActivation: true,
                     buttonNumber: 1,
-                    modifierFlags: []
+                    modifierFlags: [],
+                    requestsNewContext: true
                 ),
+                .deny,
                 String(describing: url)
             )
         }
@@ -133,37 +173,45 @@ final class NavigationPolicyTests: XCTestCase {
     func testNewContextPolicyDeniesSyntheticModifiedAndAlternateClicks() {
         let url = URL(string: "https://example.com/path")
 
-        XCTAssertFalse(
-            NewContextNavigationPolicy.shouldRouteInCurrentPage(
+        XCTAssertEqual(
+            NewContextNavigationPolicy.disposition(
                 url: url,
                 isLinkActivation: false,
                 buttonNumber: 1,
-                modifierFlags: []
-            )
+                modifierFlags: [],
+                requestsNewContext: true
+            ),
+            .deny
         )
-        for buttonNumber in [0, 2, 4] {
-            XCTAssertFalse(
-                NewContextNavigationPolicy.shouldRouteInCurrentPage(
+        for buttonNumber in [0, 2, 3, 4] {
+            XCTAssertEqual(
+                NewContextNavigationPolicy.disposition(
                     url: url,
                     isLinkActivation: true,
                     buttonNumber: buttonNumber,
-                    modifierFlags: []
-                )
+                    modifierFlags: [],
+                    requestsNewContext: true
+                ),
+                .deny
             )
         }
         for modifier: NSEvent.ModifierFlags in [
-            .command,
             .control,
             .option,
             .shift,
+            [.command, .control],
+            [.command, .option],
+            [.command, .shift],
         ] {
-            XCTAssertFalse(
-                NewContextNavigationPolicy.shouldRouteInCurrentPage(
+            XCTAssertEqual(
+                NewContextNavigationPolicy.disposition(
                     url: url,
                     isLinkActivation: true,
                     buttonNumber: 1,
-                    modifierFlags: modifier
-                )
+                    modifierFlags: modifier,
+                    requestsNewContext: true
+                ),
+                .deny
             )
         }
     }

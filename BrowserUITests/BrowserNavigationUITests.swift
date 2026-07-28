@@ -230,6 +230,15 @@ final class BrowserNavigationUITests: XCTestCase {
         submit(sentinelURL)
         XCTAssertTrue(pageText("Phase 2 Page A").waitForExistence(timeout: 5))
         waitForAddress(sentinelURL)
+
+        application.typeKey("t", modifierFlags: .command)
+        waitForTabCount(2)
+        let secondSentinelURL = fixtureURL(
+            "/phase2/page-b?phase5-tab-sentinel=4c89a1"
+        )
+        submit(secondSentinelURL)
+        XCTAssertTrue(pageText("Phase 2 Page B").waitForExistence(timeout: 5))
+        waitForAddress(secondSentinelURL)
         application.terminate()
 
         application.launchArguments = [
@@ -238,6 +247,7 @@ final class BrowserNavigationUITests: XCTestCase {
         ]
         application.launch()
         XCTAssertTrue(mainWindow.waitForExistence(timeout: 5))
+        waitForTabCount(1)
         try assertAddressFieldIsFocused()
 
         let relaunchedValue = addressField.value as? String ?? ""
@@ -249,9 +259,53 @@ final class BrowserNavigationUITests: XCTestCase {
             pageText("Phase 2 Page A").exists,
             "The prior page remained visible after relaunch."
         )
+        XCTAssertFalse(
+            pageText("Phase 2 Page B").exists,
+            "The prior secondary tab remained visible after relaunch."
+        )
     }
 
-    func testPopupPolicyBlocksScriptedAndFormWindowsButRoutesDirectLinkInPlace() {
+    func testCommandTSelectSwitchCloseAndFreshLastTab() throws {
+        launchApplication()
+        defer { application.terminate() }
+        navigate(to: "/phase2/page-a")
+        XCTAssertTrue(pageText("Phase 2 Page A").waitForExistence(timeout: 5))
+        XCTAssertTrue(tabElement(titled: "Page A").waitForExistence(timeout: 3))
+
+        application.typeKey("t", modifierFlags: .command)
+
+        waitForTabCount(2)
+        XCTAssertEqual(addressField.value as? String, "")
+        try assertAddressFieldIsFocused()
+        submit(fixtureURL("/phase2/page-b"))
+        XCTAssertTrue(pageText("Phase 2 Page B").waitForExistence(timeout: 5))
+        XCTAssertTrue(tabElement(titled: "Page B").waitForExistence(timeout: 3))
+
+        tabElement(titled: "Page A").click()
+        XCTAssertTrue(pageText("Phase 2 Page A").waitForExistence(timeout: 3))
+        waitForAddress(fixtureURL("/phase2/page-a"))
+
+        tabElement(titled: "Page B").click()
+        XCTAssertTrue(pageText("Phase 2 Page B").waitForExistence(timeout: 3))
+        waitForAddress(fixtureURL("/phase2/page-b"))
+
+        application.typeKey("w", modifierFlags: .command)
+        waitForTabCount(1)
+        XCTAssertTrue(pageText("Phase 2 Page A").waitForExistence(timeout: 3))
+        waitForAddress(fixtureURL("/phase2/page-a"))
+
+        application.typeKey("w", modifierFlags: .command)
+        waitForTabCount(1)
+        XCTAssertEqual(addressField.value as? String, "")
+        try assertAddressFieldIsFocused()
+        XCTAssertFalse(pageText("Phase 2 Page A").exists)
+
+        application.buttons["BrowserNewTabButton"].click()
+        waitForTabCount(2)
+        XCTAssertEqual(addressField.value as? String, "")
+    }
+
+    func testPopupPolicyAndUserAuthorizedNewTabs() {
         launchApplication()
         defer { application.terminate() }
         navigate(to: "/privacy/popup-policy")
@@ -266,6 +320,38 @@ final class BrowserNavigationUITests: XCTestCase {
         waitForAddress(fixtureURL("/privacy/popup-policy"))
         XCTAssertEqual(application.windows.count, 1)
         XCTAssertEqual(application.webViews.count, 1)
+        waitForTabCount(1)
+
+        let backgroundLink = application.links["Open Background Link"]
+        XCTAssertTrue(backgroundLink.waitForExistence(timeout: 3))
+        XCUIElement.perform(withKeyModifiers: [.command]) {
+            backgroundLink.click()
+        }
+        waitForTabCount(2)
+        XCTAssertTrue(
+            tabElement(titled: "Privacy Blocking")
+                .waitForExistence(timeout: 5)
+        )
+        waitForAddress(fixtureURL("/privacy/popup-policy"))
+        XCTAssertTrue(pageText("Popup Policy Fixture").exists)
+
+        tabElement(titled: "Privacy Blocking").click()
+        XCTAssertTrue(
+            pageText("First-party resource loaded")
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(pageText("Blocking fixture complete").exists)
+        XCTAssertTrue(
+            pageText("Ad resource blocked").exists,
+            "The background tab loaded without active content rules."
+        )
+        waitForAddress(fixtureURL("/privacy/blocking/?tab=background"))
+        application.typeKey("w", modifierFlags: .command)
+        waitForTabCount(1)
+        XCTAssertTrue(
+            pageText("Popup Policy Fixture").waitForExistence(timeout: 3)
+        )
+        waitForAddress(fixtureURL("/privacy/popup-policy"))
 
         application.buttons["Try Scripted Popup"].click()
         XCTAssertFalse(
@@ -275,6 +361,7 @@ final class BrowserNavigationUITests: XCTestCase {
         waitForAddress(fixtureURL("/privacy/popup-policy"))
         XCTAssertEqual(application.windows.count, 1)
         XCTAssertEqual(application.webViews.count, 1)
+        waitForTabCount(1)
 
         application.buttons["Try Scripted Anchor"].click()
         XCTAssertFalse(
@@ -284,6 +371,7 @@ final class BrowserNavigationUITests: XCTestCase {
         waitForAddress(fixtureURL("/privacy/popup-policy"))
         XCTAssertEqual(application.windows.count, 1)
         XCTAssertEqual(application.webViews.count, 1)
+        waitForTabCount(1)
 
         application.buttons["Try Targeted Form"].click()
         XCTAssertFalse(
@@ -293,10 +381,12 @@ final class BrowserNavigationUITests: XCTestCase {
         waitForAddress(fixtureURL("/privacy/popup-policy"))
         XCTAssertEqual(application.windows.count, 1)
         XCTAssertEqual(application.webViews.count, 1)
+        waitForTabCount(1)
 
         application.links["Open Direct Link"].click()
         XCTAssertTrue(pageText("Phase 2 Page B").waitForExistence(timeout: 5))
         waitForAddress(fixtureURL("/phase2/page-b"))
+        waitForTabCount(2)
         XCTAssertEqual(
             application.windows.count,
             1,
@@ -305,7 +395,7 @@ final class BrowserNavigationUITests: XCTestCase {
         XCTAssertEqual(
             application.webViews.count,
             1,
-            "A direct target-blank link left a second WebView behind."
+            "More than the selected tab was exposed as an active WebView."
         )
     }
 
@@ -709,12 +799,44 @@ final class BrowserNavigationUITests: XCTestCase {
         application.buttons["BrowserErrorReloadButton"]
     }
 
+    private var tabElements: XCUIElementQuery {
+        application.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "BrowserTab.")
+        )
+    }
+
+    private func tabElement(titled title: String) -> XCUIElement {
+        tabElements.matching(
+            NSPredicate(format: "label == %@", title)
+        ).firstMatch
+    }
+
+    private func waitForTabCount(
+        _ expectedCount: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(5)
+        while tabElements.count != expectedCount, Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTAssertEqual(
+            tabElements.count,
+            expectedCount,
+            "Tab count did not become \(expectedCount).",
+            file: file,
+            line: line
+        )
+    }
+
     private func assertCriticalControlsExist(
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
         for (name, element) in [
             ("web view", application.descendants(matching: .any)["BrowserWebView"]),
+            ("tab strip", application.descendants(matching: .any)["BrowserTabStrip"]),
+            ("new tab button", application.buttons["BrowserNewTabButton"]),
             ("back button", backButton),
             ("forward button", forwardButton),
             ("reload button", reloadStopButton),

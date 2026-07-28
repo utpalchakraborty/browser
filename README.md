@@ -6,31 +6,38 @@ application-owned browsing history, sends no application-owned telemetry, and
 includes no third-party runtime dependencies. Startup, CPU, and memory budgets
 are release gates.
 
-Phase 3 adds explicit, local bookmarks to the single-page browser: use the
-toolbar star or Command-D to add or edit the current page, and use the
-searchable Bookmarks manager to add, edit, delete, or open saved pages. Opening
-a bookmark replaces the current page until tabs arrive in Phase 5.
+Phase 3 adds explicit, local bookmarks: use the toolbar star or Command-D to add
+or edit the selected tab's page, and use the searchable Bookmarks manager to
+add, edit, delete, or open saved pages. Opening a bookmark navigates the selected
+tab.
 
-This is now a usable one-page pilot, not yet the daily-driver release. It also
-remembers the main window's size and location across relaunch while continuing
-to launch with a blank page. Phase 4 is complete: pinned,
-bundled AdGuard Base and Tracking Protection rules are enabled by default,
-popup suppression is independent of filter coverage, and a native privacy
-window exposes website-data deletion plus blocker reset controls. Functional,
-Release-package, profile, blocker, container, performance, resource, and fresh
-blank-network gates are green. Phase 5 is next and has not begun; downloads
-remain later hardening work.
+This is now a usable native multi-tab pilot, not yet the daily-driver release.
+It remembers the main window's size and location across relaunch while still
+starting with one fresh blank tab and no restored browsing session. Phase 4 is
+complete and accepted: pinned, bundled AdGuard Base and Tracking Protection
+rules are enabled by default, popup suppression is independent of filter
+coverage, and a native privacy window exposes website-data deletion plus
+blocker reset controls. Its functional, Release-package, profile, blocker,
+container, performance, resource, and fresh blank-network gates are green.
+
+The minimal Phase 5 tab implementation is complete and accepted. It provides a
+visible tab strip, new/select/close, Command-click
+background tabs, direct target-blank foreground tabs, and independent per-tab
+navigation and blocking state. Reordering, groups, pinned tabs, favicons,
+previews, and session restoration remain deliberately deferred; downloads
+remain later hardening work. Its automated gates are green, and the
+normal-session hands-on tab smoke test passed on 2026-07-28.
 
 The Phase 3 live bookmark smoke test passed, and its keyboard-first workflow is
-approved; the manual recovery exercise is still pending. Final Debug and
-Release verification each passes 135 unit tests and 12 UI tests. Production-
-list compilation, the blocker benchmark, Release bundle verification, the
-cross-process profile probe, controlled scrolling, one/ten-view resources, and
-the read-only container audit are also green. Ordinary pending navigation may
-only strengthen protection; an exact-host relaxation is applied only after the
-winning document commits, and stale callbacks cannot weaken a newer page. On
-2026-07-27, the user reported that the blocker and popup checkpoint works in
-hands-on use and approved it.
+approved; the manual recovery exercise is still pending. At the accepted Phase
+4 checkpoint, final Debug and Release verification each passed 135 unit tests
+and 12 UI tests. Production-list compilation, the blocker benchmark, Release
+bundle verification, the cross-process profile probe, controlled scrolling,
+one/ten-view resources, and the read-only container audit were also green.
+Ordinary pending navigation may only strengthen protection; an exact-host
+relaxation is applied only after the winning document commits, and stale
+callbacks cannot weaken a newer page. On 2026-07-27, the user reported that the
+blocker and popup checkpoint works in hands-on use and approved it.
 
 The final privileged audit attributed 8 positive-control outbound packets to
 Browser/WebKit, then observed 0 outbound packets during a 31-second blank
@@ -77,11 +84,20 @@ make container-audit
 make network-audit
 ~~~
 
-`make resource-ten` remains a synthetic ten-resident-view scalability probe;
-it is not a tab benchmark. `make container-audit` is a read-only inspection of
-the Browser sandbox. `make network-audit` must be run from a normal interactive
-Terminal because it requests administrator authorization only for the scoped
-packet capture. Phase 5 is next and has not begun.
+With Phase 5, `make resource-ten` launches ten real resident tabs through the
+normal tab manager and profile. `make container-audit` is a read-only inspection
+of the Browser sandbox. `make network-audit` must be run from a normal
+interactive Terminal because it requests administrator authorization only for
+the scoped packet capture.
+
+Final Phase 5 automation passed 149 Debug unit tests, 13 Debug UI tests, 149
+Release unit tests, and all 13 Release UI workflows. Release tab creation p95
+was 6.514 ms against 100 ms; selection with ten loaded resident tabs was
+2.983 ms against 50 ms. Ten-tab aggregate memory was 186.8 MiB p95 against
+1 GiB, with 0.013% mean idle CPU. A full-app 100-cycle Command-T/Command-W
+probe also settled from a 62,932 kB first-half median to 55,985 kB in the
+second half. Raw artifact paths are recorded in
+[docs/status.md](docs/status.md).
 
 ## Use
 
@@ -95,6 +111,12 @@ or HTTPS URL, a plausible hostname such as `example.com`, or search text in the
 address field and press Return.
 
 - Command-L focuses the address field.
+- Command-T creates and selects a fresh blank tab, then focuses the address
+  field. The `+` button performs the same action.
+- Click a tab to select it, or use its close control to close it.
+- Command-W closes the selected tab. Closing the sole remaining tab replaces it
+  with a fresh blank tab and focuses the address field.
+- Shift-Command-W closes the browser window.
 - Command-[ and Command-] navigate Back and Forward.
 - Command-R reloads.
 - Command-period stops an active load.
@@ -122,15 +144,17 @@ bookmarks bar. Folder hierarchy is deferred until ordinary use demonstrates a
 real need for it.
 
 Browser does not permit a page to create a secondary app window, another
-WKWebView, a background tab, or a tab-under. Scripted `window.open` requests and
-forms targeting a new context are denied. Only a direct pointer click on an
-HTTP or HTTPS anchor targeting a new context is routed; it replaces the current
-page for now. Synthetic and keyboard target-blank activation is denied because
-public WebKit API does not prove a direct pointer gesture. Phase 5 will route
-the allowed pointer action to a foreground tab. Content blocking prevents
-many advertising popup triggers and overlays before they run, but this popup
-denial remains an independent backstop rather than relying on a filter-list
-match.
+WKWebView, or a tab-under on its own. Scripted `window.open` requests and forms
+targeting a new context are denied. A physical Command-click on an HTTP or HTTPS
+anchor is an explicit user request to load that URL in a new background tab;
+the source tab remains selected and unchanged. A direct, unmodified pointer
+click on an HTTP or HTTPS anchor with `target="_blank"` opens a foreground tab.
+Synthetic and keyboard target-blank activation remains denied because public
+WebKit API does not prove a direct pointer gesture. Every created tab uses the
+same normal profile and receives the current compiled blocking rules and exact-
+host site policy. Content blocking prevents many advertising popup triggers and
+overlays before they run, but popup denial remains an independent backstop
+rather than relying on a filter-list match.
 
 ## Website data and blocking resets
 

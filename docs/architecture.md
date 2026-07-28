@@ -1,7 +1,7 @@
 # Browser Architecture
 
-Status: Approved; Phase 4 is complete with every acceptance gate green; Phase 5
-is next and has not begun
+Status: Approved; Phase 4 and the minimal Phase 5 tab implementation are
+complete, with automated gates and normal-session user acceptance green
 Last updated: 2026-07-28
 
 ## 1. Purpose
@@ -70,7 +70,8 @@ The initial product must:
 - Visibility into other website-data categories and per-site/global deletion.
 - A visible per-site blocking exception.
 - Strict popup suppression independent of content-blocking rules.
-- Multiple tabs with familiar keyboard shortcuts.
+- Basic multiple tabs with Command-T, Command-W, and Command-click background
+  opening.
 - Safe handling of common browser cases needed for daily use.
 - Local-only performance measurements and regression tests.
 
@@ -101,9 +102,11 @@ flowchart TD
     App[AppDelegate] --> Window[BrowserWindowController]
     App --> Profile[BrowserProfile]
     Profile --> Factory[WebViewFactory]
+    Window --> Tabs[TabManager]
+    Tabs --> Tab[TabController per tab]
+    Tab --> Factory
     Factory --> Web[WKWebView]
     Factory --> Store[WKWebsiteDataStore]
-    Window --> Web
 
     App --> Repository[BookmarkRepository actor]
     Window --> Coordinator[BookmarkCoordinator]
@@ -117,13 +120,12 @@ flowchart TD
     Blocking --> SitePolicy[Exact-host policy store]
     Resolver --> RuleStore[WKContentRuleListStore]
     Window --> Blocking
+    Tab --> Blocking
 
     App --> DataController[WebsiteDataController]
     DataController --> Store
     Window --> PrivacyUI[Website-data privacy window]
     PrivacyUI --> DataController
-    Window -. Phase 5 .-> Tabs[TabManager]
-    Tabs -. Phase 5 .-> Tab[TabController per resident tab]
 ~~~
 
 The important boundary is between browser-owned behavior and WebKit-owned
@@ -151,23 +153,21 @@ both ready and fail-closed blocker outcomes.
 
 BrowserWindowController owns one browser window, including:
 
-- address field and navigation buttons;
-- the current single-page WKWebView container;
-- keyboard focus and command routing;
+- address field, navigation buttons, and tab strip;
+- the selected tab's WKWebView container;
+- keyboard focus and command routing to the selected tab;
 - configuration of native frame autosave for the main window;
 - bookmark-button state and presentation of the bookmark editor and manager;
-- strengthening blocker policy before ordinary navigation, relaxing exact-host
-  policy only after the winning commit, and ignoring stale callbacks;
-- applying a user-requested current-site exception before its explicit reload
-  so document-level matches remain recoverable;
-- Privacy-menu status, exception toggling, explicit reload, and visible
-  unavailable presentation;
+- Privacy-menu status and coordination of a user-requested current-site
+  exception and explicit selected-tab reload so document-level matches remain
+  recoverable;
+- visible presentation when blocking is unavailable;
 - presentation of the website-data privacy window; and
 - coordination of global site-exception and compiled-artifact reset actions.
 
-There is no global navigation singleton. Phase 3 routes commands to the current
-page in the key browser window; Phase 5 will route the same semantic commands
-to the selected tab.
+There is no global navigation singleton. The key BrowserWindowController routes
+navigation, address, bookmark, and current-site privacy commands to its selected
+TabController; global privacy actions remain window- or profile-scoped.
 
 ### Profile layer
 
@@ -199,21 +199,35 @@ normal profile.
 
 ### Tab layer
 
-Phase 5 introduces this layer. TabManager will own the ordered tab collection,
-selected tab identifier, creation,
-closure, reordering, and routing of popup/new-window requests.
+TabManager owns the ordered tab collection, selected tab identifier, insertion,
+selection, and closure invariants. BrowserWindowController routes selected-tab
+commands and approved new-context requests through that collection. Closing the
+selected tab chooses its right neighbor when present, otherwise its left
+neighbor. Closing the sole tab replaces it with a fresh blank tab rather than
+closing the window or retaining the old tab's state.
 
 TabController is main-actor isolated and owns:
 
 - one optional WKWebView;
 - its WKNavigationDelegate and WKUIDelegate behavior;
 - observations for URL, title, progress, loading, and back/forward capability;
-- transient load errors; and
-- lightweight memory-only state such as last activation time.
+- transient navigation URLs and load errors;
+- an independent ContentBlockingNavigationState for navigation-race handling;
+  and
+- lifecycle teardown for observations, delegates, loads, blocker attachment
+  bookkeeping, callbacks, and browsing state when the tab closes.
 
-The selected tab's web view is created lazily. Once a resident tab has a web
-view, switching tabs detaches and reattaches that same native view; it does not
-reload the page. Background web views are not eagerly created.
+The window begins with one blank tab model. After the normal profile and blocker
+are ready, the initial selected tab realizes its WKWebView and loads the local
+`about:blank` page. Command-T creates and selects another blank tab, focuses the
+address field, and leaves the tab's web view unrealized until the user submits a
+URL. An approved Command-click tab has a URL immediately, so its background web
+view is realized and starts loading without changing selection.
+
+Once a tab has a resident web view, switching tabs detaches and reattaches that
+same native view without reloading it. Every realized tab uses its own WebKit
+configuration, delegates, content-rule attachment state, and navigation state,
+while all normal tabs share BrowserProfile's persistent website data store.
 
 Initial releases will not unload resident tabs. If controlled measurements show
 that memory use is unacceptable, a later policy may discard least-recently-used
@@ -223,6 +237,10 @@ as a hidden optimization.
 
 WebKit chooses how web-content processes are shared. The application will not
 try to create or tune process pools.
+
+Tab reordering, grouping, pinning, favicons, previews, animations, recently
+closed tabs, and tab/session restoration are deferred. None is represented in
+the minimal TabManager API or persisted on quit.
 
 ### WebKit construction
 
@@ -274,9 +292,9 @@ creation/update timestamps.
   or resets the library; unrecoverable data remains a visible error.
 - BookmarkCoordinator supplies immutable snapshots to the main-actor browser
   toolbar, editor sheet, and searchable nonmodal manager.
-- The toolbar star and Command-D add or edit the current page;
-  Option-Command-B opens the manager. Opening a bookmark replaces the current
-  page until Phase 5 routes it to the selected tab.
+- The toolbar star and Command-D add or edit the selected tab's current page;
+  Option-Command-B opens the manager. Opening a bookmark replaces the selected
+  tab's current page.
 
 Phase 3 deliberately has no persistent bookmarks bar and no folder hierarchy.
 The searchable manager and keyboard commands keep the browsing surface compact;
@@ -408,8 +426,7 @@ No application-owned file may contain a passive list of navigated URLs.
 - Current tab URLs and titles.
 - Back/forward lists.
 - Navigation progress and errors.
-- Popup routing state.
-- Per-tab last-activation timestamps.
+- Per-tab navigation and blocker-transition state.
 
 Window geometry is not browsing state. A normal quit and relaunch may restore
 only the main-window frame through AppKit's native frame-autosave behavior.
@@ -459,18 +476,22 @@ can provide a stronger no-persistence mode.
   errors or opts into deprecated TLS.
 - HTTP and HTTPS are accepted. Other URL schemes are denied or explicitly
   handed to macOS under a small, tested allowlist and visible user action.
-- No page may create a secondary app window, another WKWebView, a background
-  tab, or a tab-under. Scripted `window.open` requests and forms targeting a new
-  browsing context are denied, including requests triggered by page script in
-  response to a click.
-- Only a direct pointer-activated HTTP or HTTPS anchor targeting a new browsing
-  context may be routed. WebKit exposes a nonzero mouse-button value for that
-  action; JavaScript `anchor.click()` reports `linkActivated` but no mouse
-  button and is denied. Keyboard/synthetic target-blank activation is also
-  denied because public API does not prove a direct pointer gesture. The
-  allowed pointer action replaces the current page and may become a new
-  foreground tab only after Phase 5; it never becomes a background tab or
-  separate app window.
+- A page may not autonomously create a secondary app window, WKWebView,
+  background tab, or tab-under. Scripted `window.open` requests, forms targeting
+  a new browsing context, and requests triggered by page script in response to
+  a click are denied.
+- Only a direct physical pointer activation of an HTTP or HTTPS anchor may
+  create a tab. An unmodified activation that requests a new browsing context,
+  such as `target=_blank`, opens a foreground tab. Command-click, with Command
+  as the only browser-intent modifier, opens the link in a background tab and
+  leaves the source selected whether or not the anchor requests a new context.
+  A plain unmodified same-frame link continues in the selected tab.
+- Alternate buttons, other browser-intent modifier combinations, non-HTTP(S)
+  targets, keyboard or synthetic activation, and JavaScript `anchor.click()`
+  cannot create tabs. If any such action requests a new context, it is denied;
+  so is any new-context request that WebKit does not identify as a direct
+  pointer link activation. Approved tab creation still returns no separate
+  WKWebView to page code and never creates a secondary app window.
 - Ad/tracker blocking may prevent common advertising popup triggers and
   overlays before they execute, but delegate-level popup denial is an
   independent backstop and never depends on a filter-list match.
@@ -559,8 +580,8 @@ Navigation completion is never treated as a signal to persist a visit.
 - A failed cookie/site-data deletion remains visible and refreshes from WebKit
   before reporting success.
 - Unsupported permissions and schemes fail closed with understandable UI.
-- Closing a tab releases observers and delegates; churn tests check for
-  monotonic memory growth.
+- Closing a tab releases observers and delegates; full-app churn tests bound
+  second-half memory growth while retaining monotonic growth as a diagnostic.
 
 ## 11. Planned source layout
 
@@ -621,7 +642,7 @@ pages for:
 - content-rule request blocking and exceptions;
 - downloads and authentication;
 - relaunch with restored window geometry but no restored browsing state;
-- bookmark add, edit, title/URL search, open-in-current-page, delete, and
+- bookmark add, edit, title/URL search, open-in-selected-tab, delete, and
   relaunch persistence;
 - tab switching without reload; and
 - web-content process recovery where automation permits.
@@ -737,7 +758,15 @@ one/ten-view resource gates pass. The final machine-privileged blank-network
 audit also passes: its exact Browser/WebKit attribution filter captured 8
 positive-control outbound packets, then 0 outbound packets during 31 seconds of
 production blank launch/idle. Artifact:
-`.build/NetworkAudit.HxyZ8u/result.txt`. Phase 5 is next and has not begun.
+`.build/NetworkAudit.HxyZ8u/result.txt`.
+
+The minimal Phase 5 tab architecture is implemented: TabManager and per-tab
+TabController ownership, selected-tab command routing, lazy blank tabs,
+Command-T and Command-W, resident-view switching, direct target-blank foreground
+tabs, exact Command-click background tabs, and conservative scripted-popup
+denial. Phase-specific functional, Release packaging, performance, ten-tab
+resource, WebContent lifecycle, and no-history gates pass. The normal-session
+user smoke test passed on 2026-07-28, completing Phase 5 acceptance.
 
 The measured WebKit API and platform risk decision is recorded in
 [phase-1-risk-report.md](phase-1-risk-report.md).

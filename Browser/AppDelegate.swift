@@ -416,11 +416,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         addMenu(applicationMenu, to: mainMenu)
 
         let fileMenu = NSMenu(title: "File")
-        fileMenu.addItem(
+        let newTabItem = fileMenu.addItem(
+            withTitle: "New Tab",
+            action: #selector(BrowserWindowController.newTab(_:)),
+            keyEquivalent: "t"
+        )
+        newTabItem.target = navigationTarget
+        let closeTabItem = fileMenu.addItem(
+            withTitle: "Close Tab",
+            action: #selector(BrowserWindowController.closeSelectedTab(_:)),
+            keyEquivalent: "w"
+        )
+        closeTabItem.target = navigationTarget
+        fileMenu.addItem(.separator())
+        let closeWindowItem = fileMenu.addItem(
             withTitle: "Close Window",
             action: #selector(NSWindow.performClose(_:)),
             keyEquivalent: "w"
         )
+        closeWindowItem.keyEquivalentModifierMask = [.command, .shift]
         addMenu(fileMenu, to: mainMenu)
 
         let editMenu = NSMenu(title: "Edit")

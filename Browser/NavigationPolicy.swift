@@ -36,28 +36,47 @@ nonisolated enum NavigationPolicy {
     }
 }
 
+nonisolated enum NewTabNavigationDisposition: Equatable, Sendable {
+    case continueInCurrentFrame
+    case foregroundTab
+    case backgroundTab
+    case deny
+}
+
 nonisolated enum NewContextNavigationPolicy {
-    static func shouldRouteInCurrentPage(
+    private static let browserIntentModifiers: NSEvent.ModifierFlags = [
+        .command,
+        .control,
+        .option,
+        .shift,
+    ]
+
+    static func disposition(
         url: URL?,
         isLinkActivation: Bool,
         buttonNumber: Int,
-        modifierFlags: NSEvent.ModifierFlags
-    ) -> Bool {
-        guard
-            isLinkActivation,
-            buttonNumber == 1,
-            modifierFlags.intersection([
-                .command,
-                .control,
-                .option,
-                .shift,
-            ]).isEmpty,
-            let scheme = url?.scheme?.lowercased(),
-            ["http", "https"].contains(scheme)
-        else {
-            return false
+        modifierFlags: NSEvent.ModifierFlags,
+        requestsNewContext: Bool
+    ) -> NewTabNavigationDisposition {
+        let intentModifiers = modifierFlags.intersection(
+            browserIntentModifiers
+        )
+        let scheme = url?.scheme?.lowercased()
+        let isWebURL = scheme == "http" || scheme == "https"
+        let isDirectPrimaryLink = isLinkActivation
+            && buttonNumber == 1
+            && isWebURL
+
+        if isDirectPrimaryLink, intentModifiers == [.command] {
+            return .backgroundTab
         }
 
-        return true
+        if requestsNewContext {
+            return isDirectPrimaryLink && intentModifiers.isEmpty
+                ? .foregroundTab
+                : .deny
+        }
+
+        return .continueInCurrentFrame
     }
 }

@@ -17,6 +17,11 @@ NAVIGATION_METRIC = "Duration (FirstBlankNavigation)"
 ADDRESS_SUBMISSION_METRIC = "Duration (AddressSubmission)"
 BROWSER_COMMAND_METRIC = "Duration (BrowserCommand)"
 LOCAL_NAVIGATION_METRIC = "Duration (LocalFixtureNavigation)"
+TAB_CREATION_METRIC = "Duration (TabCreation)"
+TAB_SELECTION_METRIC = "Duration (TabSelection)"
+TAB_CHURN_ABSOLUTE_MEMORY_METRIC = "Absolute Memory Physical (browser)"
+TAB_CHURN_PEAK_MEMORY_METRIC = "Memory Peak Physical (browser)"
+TAB_CHURN_DELTA_MEMORY_METRIC = "Memory Physical (browser)"
 SCROLL_HITCH_DURATION_METRIC = "Hitches Total Duration (browser)"
 SCROLL_HITCH_COUNT_METRIC = "Number of Hitches (browser)"
 SCROLL_HITCH_RATIO_METRIC = "Hitch Time Ratio (browser)"
@@ -33,9 +38,22 @@ BROWSER_COMMAND_TEST = (
 SCROLL_TEST = (
     "BrowserLaunchPerformanceTests/testControlledScrollingResponsiveness()"
 )
+TAB_CREATION_TEST = (
+    "BrowserLaunchPerformanceTests/testNewBlankTabChromeResponse()"
+)
+TAB_SELECTION_TEST = (
+    "BrowserLaunchPerformanceTests/testSwitchBetweenTenResidentTabs()"
+)
+TAB_CHURN_TEST = (
+    "BrowserLaunchPerformanceTests/"
+    "testOneHundredBlankTabOpenCloseCycles()"
+)
 EXPECTED_LAUNCH_SAMPLE_COUNT = 20
 EXPECTED_NAVIGATION_SAMPLE_COUNT = 20
 EXPECTED_SCROLL_SAMPLE_COUNT = 10
+EXPECTED_TAB_CREATION_SAMPLE_COUNT = 20
+EXPECTED_TAB_SELECTION_SAMPLE_COUNT = 50
+EXPECTED_TAB_CHURN_SAMPLE_COUNT = 10
 
 
 def nearest_rank(values, percentile):
@@ -94,6 +112,18 @@ def metrics_by_name(report, test_identifier):
     if not by_name:
         raise ValueError(f"Xcode returned no metrics for {test_identifier}")
     return by_name
+
+
+def metric_units_by_name(report, test_identifier):
+    test_runs = report.get("testRuns", [])
+    if len(test_runs) != 1:
+        raise ValueError(
+            f"expected exactly one measured run for {test_identifier}"
+        )
+    return {
+        metric["displayName"]: metric.get("unitOfMeasurement", "")
+        for metric in test_runs[0].get("metrics", [])
+    }
 
 
 def require_metrics(by_name, names, sample_count, test_identifier):
@@ -172,6 +202,9 @@ def main():
     )
     browser_command_report = report_for_test(reports, BROWSER_COMMAND_TEST)
     scroll_report = report_for_test(reports, SCROLL_TEST)
+    tab_creation_report = report_for_test(reports, TAB_CREATION_TEST)
+    tab_selection_report = report_for_test(reports, TAB_SELECTION_TEST)
+    tab_churn_report = report_for_test(reports, TAB_CHURN_TEST)
     launch_by_name = metrics_by_name(launch_report, LAUNCH_TEST)
     local_navigation_by_name = metrics_by_name(
         local_navigation_report,
@@ -182,6 +215,19 @@ def main():
         BROWSER_COMMAND_TEST,
     )
     scroll_by_name = metrics_by_name(scroll_report, SCROLL_TEST)
+    tab_creation_by_name = metrics_by_name(
+        tab_creation_report,
+        TAB_CREATION_TEST,
+    )
+    tab_selection_by_name = metrics_by_name(
+        tab_selection_report,
+        TAB_SELECTION_TEST,
+    )
+    tab_churn_by_name = metrics_by_name(tab_churn_report, TAB_CHURN_TEST)
+    tab_churn_units_by_name = metric_units_by_name(
+        tab_churn_report,
+        TAB_CHURN_TEST,
+    )
 
     required_launch_metric_names = (
         APPLICATION_METRIC,
@@ -224,6 +270,29 @@ def main():
         EXPECTED_SCROLL_SAMPLE_COUNT,
         SCROLL_TEST,
     )
+    require_metrics(
+        tab_creation_by_name,
+        (TAB_CREATION_METRIC,),
+        EXPECTED_TAB_CREATION_SAMPLE_COUNT,
+        TAB_CREATION_TEST,
+    )
+    require_metrics(
+        tab_selection_by_name,
+        (TAB_SELECTION_METRIC,),
+        EXPECTED_TAB_SELECTION_SAMPLE_COUNT,
+        TAB_SELECTION_TEST,
+    )
+    required_tab_churn_metric_names = (
+        TAB_CHURN_ABSOLUTE_MEMORY_METRIC,
+        TAB_CHURN_PEAK_MEMORY_METRIC,
+        TAB_CHURN_DELTA_MEMORY_METRIC,
+    )
+    require_metrics(
+        tab_churn_by_name,
+        required_tab_churn_metric_names,
+        EXPECTED_TAB_CHURN_SAMPLE_COUNT,
+        TAB_CHURN_TEST,
+    )
 
     launch_summaries = {
         name: summarize_seconds(values)
@@ -236,6 +305,78 @@ def main():
     browser_command_summaries = {
         name: summarize_seconds(values)
         for name, values in browser_command_by_name.items()
+    }
+    tab_creation = summarize_seconds(
+        tab_creation_by_name[TAB_CREATION_METRIC]
+    )
+    tab_creation["p95_ceiling_ms"] = 100.0
+    tab_creation["passed"] = (
+        tab_creation["p95_ms"] <= tab_creation["p95_ceiling_ms"]
+    )
+    tab_selection = summarize_seconds(
+        tab_selection_by_name[TAB_SELECTION_METRIC]
+    )
+    tab_selection["resident_tab_count"] = 10
+    tab_selection["p95_ceiling_ms"] = 50.0
+    tab_selection["passed"] = (
+        tab_selection["p95_ms"] <= tab_selection["p95_ceiling_ms"]
+    )
+    tab_churn_memory_summaries = {}
+    for name in required_tab_churn_metric_names:
+        unit = tab_churn_units_by_name[name]
+        if unit != "kB":
+            raise ValueError(
+                f"expected kB samples for {name}, found {unit or 'no unit'}"
+            )
+        summary = summarize_values(tab_churn_by_name[name], unit)
+        summary["measurements"] = tab_churn_by_name[name]
+        tab_churn_memory_summaries[name] = summary
+
+    absolute_memory_values = tab_churn_by_name[
+        TAB_CHURN_ABSOLUTE_MEMORY_METRIC
+    ]
+    half_sample_count = len(absolute_memory_values) // 2
+    first_half_median = statistics.median(
+        absolute_memory_values[:half_sample_count]
+    )
+    second_half_median = statistics.median(
+        absolute_memory_values[half_sample_count:]
+    )
+    growth_percent = (
+        (second_half_median - first_half_median)
+        / first_half_median
+        * 100
+    )
+    monotonic_growth = (
+        absolute_memory_values[-1] > absolute_memory_values[0]
+        and all(
+            current >= previous
+            for previous, current in zip(
+                absolute_memory_values,
+                absolute_memory_values[1:],
+            )
+        )
+    )
+    tab_churn_growth = {
+        "criterion": (
+            "second-half median absolute footprint is within 10% of the "
+            "first-half median"
+        ),
+        "scope": (
+            "bounded churn trend; the external ten-tab resource gate remains "
+            "the hard absolute-memory ceiling"
+        ),
+        "first_half_median_kb": first_half_median,
+        "second_half_median_kb": second_half_median,
+        "growth_percent": growth_percent,
+        "maximum_growth_percent": 10.0,
+        "monotonic_growth": monotonic_growth,
+        "monotonic_growth_enforced": False,
+        "monotonic_growth_note": (
+            "diagnostic only because allocator and cache settling can produce "
+            "monotonic batch endpoints without proving retained tab state"
+        ),
+        "passed": growth_percent <= 10.0,
     }
     scroll_hitch_duration = summarize_seconds(
         scroll_by_name[SCROLL_HITCH_DURATION_METRIC]
@@ -360,6 +501,17 @@ def main():
         "local_navigation_metrics": local_navigation_summaries,
         "browser_command_metrics": browser_command_summaries,
         "controlled_scrolling_metrics": scrolling_summaries,
+        "tab_creation_metrics": {TAB_CREATION_METRIC: tab_creation},
+        "ten_resident_tab_selection_metrics": {
+            TAB_SELECTION_METRIC: tab_selection,
+        },
+        "blank_tab_churn": {
+            "cycles": 100,
+            "cycles_per_batch": 10,
+            "measured_batches": EXPECTED_TAB_CHURN_SAMPLE_COUNT,
+            "memory_metrics": tab_churn_memory_summaries,
+            "growth_check": tab_churn_growth,
+        },
         "address_field_focus_asserted_for_each_launch": True,
         "initial_webview_readiness_proxy": derived,
         "expected_launch_samples_per_metric": EXPECTED_LAUNCH_SAMPLE_COUNT,
@@ -367,11 +519,21 @@ def main():
             EXPECTED_NAVIGATION_SAMPLE_COUNT
         ),
         "expected_scroll_samples_per_metric": EXPECTED_SCROLL_SAMPLE_COUNT,
+        "expected_tab_creation_samples": EXPECTED_TAB_CREATION_SAMPLE_COUNT,
+        "expected_tab_selection_samples": (
+            EXPECTED_TAB_SELECTION_SAMPLE_COUNT
+        ),
+        "expected_tab_churn_samples_per_metric": (
+            EXPECTED_TAB_CHURN_SAMPLE_COUNT
+        ),
         "regression_comparison": regression_comparison,
         "passed": (
             application["passed"]
             and derived["passed"]
             and all(command["passed"] for command in command_summaries)
+            and tab_creation["passed"]
+            and tab_selection["passed"]
+            and tab_churn_growth["passed"]
             and scroll_hitch_duration["passed"]
             and scroll_hitch_count["passed"]
             and scroll_hitch_ratio["passed"]
@@ -408,6 +570,38 @@ def main():
             f"max {summary['maximum_ms']:.3f} ms "
             f"({summary['samples']} samples)"
         )
+    for name, summary in (
+        (TAB_CREATION_METRIC, tab_creation),
+        (TAB_SELECTION_METRIC, tab_selection),
+    ):
+        print(
+            f"{name}: min {summary['minimum_ms']:.3f} ms, "
+            f"median {summary['median_ms']:.3f} ms, "
+            f"mean {summary['mean_ms']:.3f} ms, "
+            f"p95 {summary['p95_ms']:.3f} ms, "
+            f"max {summary['maximum_ms']:.3f} ms "
+            f"({summary['samples']} samples; "
+            f"p95 ceiling {summary['p95_ceiling_ms']:.0f} ms)"
+        )
+    for name, summary in tab_churn_memory_summaries.items():
+        print(
+            f"{name}: min {summary['minimum']:.3f} {summary['unit']}, "
+            f"median {summary['median']:.3f} {summary['unit']}, "
+            f"mean {summary['mean']:.3f} {summary['unit']}, "
+            f"p95 {summary['p95']:.3f} {summary['unit']}, "
+            f"max {summary['maximum']:.3f} {summary['unit']} "
+            f"({summary['samples']} batches)"
+        )
+    print(
+        "Blank-tab churn growth: "
+        f"first-half median {tab_churn_growth['first_half_median_kb']:.3f} "
+        "kB, "
+        f"second-half median "
+        f"{tab_churn_growth['second_half_median_kb']:.3f} kB, "
+        f"change {tab_churn_growth['growth_percent']:+.2f}%, "
+        f"monotonic {'yes' if tab_churn_growth['monotonic_growth'] else 'no'} "
+        f"({'PASS' if tab_churn_growth['passed'] else 'FAIL'})"
+    )
     print(
         f"{SCROLL_HITCH_DURATION_METRIC}: "
         f"min {scroll_hitch_duration['minimum_ms']:.3f} ms, "

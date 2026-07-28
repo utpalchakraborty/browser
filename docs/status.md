@@ -16,37 +16,124 @@ Last updated: 2026-07-28
   interval. Artifact: `.build/NetworkAudit.HxyZ8u/result.txt`.
 - The blocker and popup checkpoint remains approved and committed as `074fc81`
   (`Complete Phase 4 blocker checkpoint`). The separate Phase 3 manual bookmark
-  recovery exercise remains pending. Phase 5 is next and has not begun.
+  recovery exercise remains pending.
+- The minimal Phase 5 tab implementation is complete. A visible native strip
+  supports new, select, and close; Command-click opens a source-preserving
+  background tab; direct target-blank links open a foreground tab; and each tab
+  owns independent navigation and blocking state.
+- Phase 5 automated verification is green: 149 Debug and Release unit tests,
+  all 13 Debug and Release UI workflows, Release packaging, launch and
+  interaction performance, ten-tab switching, ten-tab resources, WebContent
+  termination, and the read-only no-history audit pass. The user completed the
+  normal-session tab smoke test on 2026-07-28 and confirmed everything works.
 
 ## Current phase
 
-Phase 4 — complete. Implementation, functional verification, privacy UI,
-Release packaging, profile/container/network inspection, and performance and
-resource gates all pass. Pinned production rules are enabled by default,
-exact-host recovery is available from Privacy, popup denial is independent of
-filter matches, and Privacy > Manage Website Data exposes WebKit data plus
-global blocker resets. Phase 5 is the next planned phase and has not begun.
+Phase 5 — minimal tabs complete and accepted. The
+implemented scope is intentionally limited to the high-frequency tab workflow:
+create, select, close, Command-click into a background tab, and direct
+target-blank routing into a foreground tab. Automated verification and the
+normal-session hands-on smoke test pass.
+
+Phase 4 remains complete and accepted. Its implementation, functional
+verification, privacy UI, Release packaging, profile/container/network
+inspection, performance, and resource gates all pass. Pinned production rules
+are enabled by default, exact-host recovery is available from Privacy, popup
+denial is independent of filter matches, and Privacy > Manage Website Data
+exposes WebKit data plus global blocker resets.
 
 The clean idle-desktop launch rerun is now green; the separate Phase 3 manual
 bookmark-recovery exercise is still pending. The navigation-boundary privacy
 race described below is resolved. On 2026-07-27, the user reported that the
 Phase 4 blocker and popup checkpoint works in hands-on use and approved it.
 
-The browser is now a usable native single-page pilot. It accepts HTTP and HTTPS
-URLs, infers HTTPS for plausible hosts, searches plain text, exposes WebKit
-navigation state through responsive AppKit controls, and creates no passive
-visit history. Application-owned persistence is limited to explicit bookmarks,
-required preferences and window geometry, exact-host blocker exceptions, and
-last-valid blocker identifiers. The Phase 1 WKWebView GO decision remains
-unchanged.
+The browser is now a usable native multi-tab pilot. It accepts HTTP and HTTPS
+URLs, infers HTTPS for plausible hosts, searches plain text, exposes the
+selected tab's WebKit navigation state through responsive AppKit controls, and
+creates no passive visit history. Open tabs, their order, URLs, titles, and
+back/forward state remain memory-only. Application-owned persistence is limited
+to explicit bookmarks, required preferences and window geometry, exact-host
+blocker exceptions, and last-valid blocker identifiers. The Phase 1 WKWebView
+GO decision remains unchanged.
+
+## Phase 5 minimal tabs complete and accepted
+
+- The main window has a visible native tab strip. The `+` button or Command-T
+  creates and selects a fresh blank tab and focuses the address field. Clicking
+  a tab selects it; each tab exposes its own close control.
+- Command-W closes the selected tab. Closing the sole remaining tab destroys its
+  WebView and browsing state, replaces it with a fresh blank tab, and focuses
+  the address field. Shift-Command-W closes the browser window.
+- Closing a selected tab chooses the tab to its right when available, otherwise
+  the tab to its left. Closing a background tab preserves the selected tab.
+- A physical Command-click on an HTTP or HTTPS anchor opens and loads a new
+  background tab without selecting it or changing the source tab. A direct,
+  unmodified pointer click on an HTTP or HTTPS `target="_blank"` anchor opens a
+  foreground tab.
+- Scripted `window.open`, script-triggered anchors, target-blank forms,
+  synthetic activation, separate app windows, and tab-unders remain denied.
+  Popup denial remains independent of content-blocking filter matches.
+- Every resident tab uses the normal profile and receives the current compiled
+  blocking rules and exact-host policy. URL, title, progress, loading,
+  back/forward, error, retry, and blocker navigation state are owned per tab;
+  selecting a resident tab does not intentionally reload it.
+- Relaunch still restores only window geometry. It starts with one fresh blank
+  tab and focused address field; there is no tab/session restoration or recently
+  closed list.
+- Reordering, tab groups, pinned tabs, favicons, previews, animations,
+  suspension, and recovery of closed tabs are deferred until ordinary use shows
+  a need.
+
+Phase 5 implementation and acceptance are complete. Functional, privacy,
+performance, resource, lifecycle, and no-history gates are green. On 2026-07-28,
+the user completed the normal-session tab smoke test and confirmed that the
+visible tab behavior works.
+
+### Phase 5 automated evidence
+
+- The final Debug combined run passed all 149 unit tests and all 13 UI
+  workflows at `.build/TestResults.qPE4pQ/Browser.xcresult`.
+- The final Release unit run passed all 149 tests at
+  `.build/TestResults.7Le6Ou/Browser.xcresult`; the clean complete Release UI
+  run passed all 13 workflows at
+  `.build/TestResults.rh5aoW/Browser.xcresult`.
+- Release launch passed 20 fresh-process samples. First-frame median/p95 were
+  338.592/366.466 ms, native-window median/p95 were 95.559/112.507 ms, and
+  first-blank-navigation median/p95 were 84.995/97.708 ms. Artifact:
+  `.build/LaunchRetry-20260728-0738.xcresult`.
+- Existing interaction gates pass on the tab build: address-submission,
+  back/forward-command, and local-navigation p95 were 0.357, 0.195, and
+  19.856 ms, and ten controlled-scroll samples had zero browser hitches.
+  Artifact: `.build/InteractionPerfFocused-20260728-0744.xcresult`.
+- New blank-tab chrome p95 is 6.514 ms against 100 ms at
+  `.build/TabCreationFinal-20260728-0842.xcresult`. Switching with ten loaded
+  resident tabs is 2.983 ms p95 against 50 ms at
+  `.build/TabSelectionFinal-20260728-0840.xcresult`.
+- Ten actual resident tabs pass at 184.2 MiB median and 186.8 MiB p95 aggregate
+  memory against 1 GiB, with 0.013% mean idle CPU against 1%. Artifact:
+  `.build/ResourceBaseline.v10.euHb4k/summary.json`.
+- The 100-cycle tab-manager regression and the full-app 100-cycle
+  Command-T/Command-W churn probe pass. Across the full-app probe's ten
+  ten-cycle batches, median absolute memory fell from 62,932 kB in the first
+  half to 55,985 kB in the second half, an 11.04% decrease that passes the
+  no-more-than-10% growth gate. Artifact:
+  `.build/TabChurnFinal-20260728-0836.xcresult`.
+- Closing a resident tab now clears all transient navigation and blocker state;
+  queued delegate callbacks from closed or non-owned WebViews are ignored.
+  Release WebContent termination also passes, with Browser surviving and
+  cleanup completing at `.build/WebContentTermination.6t3i5Q`.
+- Production Release verification passes arm64, signature, sandbox,
+  entitlements, hardened runtime, and pinned blocker-asset checks. The final
+  read-only no-history audit reports zero failures and zero warnings at
+  `.build/ContainerAudit.20260728T120411Z.uTeaff/report.txt`.
 
 ## Phase 3 implemented
 
 - A toolbar star and Command-D add the current page or edit its existing
   bookmark. Option-Command-B opens a nonmodal, searchable Bookmarks manager.
 - Add, edit, delete, title/URL search, duplicate handling, relaunch persistence,
-  and open-in-current-page workflows are implemented. Tabs remain deliberately
-  absent until Phase 5.
+  and open workflows are implemented. Phase 5 now routes bookmark opening and
+  creation through the selected tab.
 - The bookmark library is intentionally a flat, keyboard-first searchable
   manager with no persistent bookmarks bar. The user approved this cleaner
   workflow; folder hierarchy is deferred until real use demonstrates a need.
@@ -212,16 +299,19 @@ arm64, signature, App Sandbox, hardened runtime, exact entitlements, and
 independently pinned blocker-resource checks for
 `.build/DerivedData/Build/Products/Release/Browser.app`.
 
-The clean Release run remains the accepted production-app launch, navigation,
-command, and readiness gate. First-frame median/p95/max are
+The clean Release run remains the accepted Phase 4 production-app launch,
+navigation, command, and readiness gate. It predates and is superseded for
+Phase 5 evidence by the fresh tab-specific results above. First-frame
+median/p95/max are
 429.257/538.403/577.416 ms; native-window median/p95 are 88.269/106.669 ms; and
 the conservative initial-WebView readiness proxy is
 636.481/754.233/796.431 ms. Address submission median/p95 are 0.217/0.433 ms,
 browser command 0.174/0.193 ms, and local navigation 12.751/17.180 ms. Relative
 to Phase 2, first-frame median/p95 improved 13.89%/4.78% and readiness improved
 11.67%/4.02%. The 10,000-bookmark load and search p95 values are 62.716 ms and
-18.980 ms. Artifact: `.build/PerformanceResults.X3uvqP`. Production application
-code did not change after this clean passing run.
+18.980 ms. Artifact: `.build/PerformanceResults.X3uvqP`. At the Phase 4
+checkpoint, production application code had not changed after this clean
+passing run; Phase 5's fresh verification is recorded above.
 
 The scrolling harness was subsequently hardened in test/fixture code only. A
 visible `top`/`moved` marker now proves a swipe actually moves the deterministic
@@ -274,7 +364,7 @@ and location through AppKit's native frame autosave. AppKit applies the saved
 frame for the current display environment, while the browser keeps its centered
 default when there is no usable saved frame. AppKit state restoration stays
 disabled, and relaunch must remain blank with the address field focused; no URL,
-page, back/forward, or future tab state may be restored.
+page, back/forward, or tab state may be restored.
 
 The user manually approved this behavior, and it was committed as `aa8ee6a`.
 
@@ -331,19 +421,20 @@ network evidence.
 
 ## Current limitations
 
-There is one page and one window. Opening a bookmark replaces the current page.
-Production ad/tracker rules and the website-data privacy manager are active.
-Phase 5 tabs are next but have not begun. Downloads and private windows remain
-later work.
+There is one browser window with multiple memory-only tabs. Opening a bookmark
+targets the selected tab. Production ad/tracker rules and the website-data
+privacy manager are active. Tab reordering, grouping, pinning, previews,
+favicons, session restoration, and recently closed tabs are not implemented.
+Downloads and private windows remain later work.
 
-Programmatic popups are suppressed, and the roadmap now makes that behavior an
-explicit invariant: no page-created secondary app window, WKWebView, background
-tab, or tab-under is permitted. Scripted `window.open` and forms targeting a new
-context are denied. Only a direct pointer click on an HTTP or HTTPS anchor
-targeting a new context may route anywhere; it replaces the current page now
-and will open a foreground tab in Phase 5. Ad/tracker blocking often stops
-popup scripts and advertising overlays before they run, but popup denial is a
-separate backstop that does not depend on a filter match.
+Programmatic popups are suppressed: no page-created secondary app window,
+autonomous background tab, or tab-under is permitted. Scripted `window.open`
+and forms targeting a new context are denied. A physical Command-click is an
+explicit user request for a background tab and preserves the source tab; a
+direct unmodified pointer click on an HTTP or HTTPS target-blank anchor opens a
+foreground tab. Ad/tracker blocking often stops popup scripts and advertising
+overlays before they run, but popup denial is a separate backstop that does not
+depend on a filter match.
 
 DNS and TLS presentations have deterministic unit coverage; the end-to-end UI
 retry scenario uses a refused localhost connection. Representative real-site
@@ -352,8 +443,10 @@ automated gate.
 
 ## Next action
 
-Phase 4 is complete. Stop at this checkpoint for review. Phase 5 tabs are next,
-but no Phase 5 implementation has begun.
+Phase 5 is complete. Use the accepted minimal tab workflow in ordinary browsing
+before selecting any Phase 6 daily-driver hardening feature; reordering,
+grouping, pinned tabs, previews, and session restoration remain deferred until
+real use demonstrates a need.
 
 Separately, back up the bookmark files, force one recovery, and test Restore
 Backup or Reset Bookmarks. Revisit bookmark folders only if ordinary use shows

@@ -394,6 +394,7 @@ open
 <title>Popup Policy</title>
 <body>
 <main>Popup Policy Fixture</main>
+<a href="/privacy/blocking/?tab=background">Open Background Link</a>
 <a href="/phase2/page-b" target="_blank">Open Direct Link</a>
 <a id="scripted-anchor" href="/phase2/page-b?popup=scripted-anchor"
    target="_blank" hidden>Scripted Anchor Target</a>

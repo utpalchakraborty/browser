@@ -4,7 +4,8 @@ Status: Approved; Phases 1 and 2 complete; window geometry approved and
 committed; Phase 3 bookmarks implemented with functional and performance gates
 green and normal workflow approved, with the manual recovery exercise pending;
 Phase 4 complete with every functional, privacy, packaging, network, container,
-and performance/resource gate green; Phase 5 is next and has not begun
+and performance/resource gate green; the minimal Phase 5 implementation is
+complete and accepted, with automated and normal-session gates green
 Last updated: 2026-07-28
 Architecture: [architecture.md](architecture.md)
 
@@ -428,7 +429,8 @@ use shows the flat searchable library is insufficient.
 ## 9. Phase 4 — Ad/tracker blocking, privacy controls, and popup suppression
 
 Phase 4 is complete. Every functional, privacy, packaging, network, container,
-and performance/resource gate passes. Phase 5 is next and has not begun.
+and performance/resource gate passes. The approved minimal Phase 5 slice is now
+implemented and accepted after its final normal-session smoke test.
 
 ### Goal
 
@@ -608,8 +610,10 @@ captured 8 outbound packets and the production blank launch captured 0 outbound
 packets during 31 seconds idle. The recorded result is `PASS` at
 `.build/NetworkAudit.HxyZ8u/result.txt`.
 
-All Phase 4 exit criteria are satisfied. Stop at this completed checkpoint for
-review. Phase 5 is next and has not begun.
+All Phase 4 exit criteria are satisfied. The user-approved minimal Phase 5
+implementation and automated acceptance gates are now complete in the working
+tree. The user completed the normal-session tab smoke test on 2026-07-28 and
+accepted the checkpoint.
 
 ## 10. Phase 5 — Tabs and web-view lifecycle
 
@@ -618,15 +622,31 @@ review. Phase 5 is next and has not begun.
 Add reliable multi-tab browsing without weakening the established blocking,
 popup, memory, or responsiveness guarantees.
 
+### Current status
+
+Implementation and acceptance complete. The implemented scope is the small,
+high-frequency tab workflow approved for this phase. The automated gates and
+normal-session user smoke test pass.
+
 ### Work
 
 - Implement TabManager and TabController.
-- Add new, close, select, and reorder behavior.
+- Add a simple visible tab strip with new, close, and select behavior.
+- Make Command-T create and select a fresh blank tab, then focus and select the
+  address field so the user can immediately enter a URL or search.
+- Make Command-W close the selected tab. Closing the sole remaining tab replaces
+  it with a fresh blank tab and focuses the address field; closing a selected tab
+  chooses the tab to its right when possible, otherwise the tab to its left.
 - Route navigation and bookmark commands to the selected tab in the key window.
-- Add familiar tab keyboard shortcuts.
-- Route only a direct pointer-activated HTTP or HTTPS anchor targeting a new
-  context to a new foreground tab. Continue denying scripted `window.open`,
-  target-blank forms, separate app windows, background tabs, and tab-unders.
+- Route an exact Command-click on a direct, physically pointer-activated HTTP or
+  HTTPS link to a new background tab. Load it immediately without changing the
+  selected source tab or its address.
+- Route an unmodified direct, physically pointer-activated HTTP or HTTPS anchor
+  with `target="_blank"` to a new foreground tab.
+- Continue denying scripted `window.open`, script-triggered anchors,
+  target-blank forms, keyboard-created contexts, unsupported schemes, alternate
+  mouse buttons, unsupported modifier combinations, separate app windows, and
+  tab-unders.
 - Ensure every new WKWebView uses the normal profile, current compiled rules,
   and current site policy through WebViewFactory.
 - Apply blocker and exception changes coherently across resident tabs and reload
@@ -637,28 +657,48 @@ popup, memory, or responsiveness guarantees.
 - Keep all tab/session state in memory and disable recently closed behavior.
 - Show a recovery state if a tab's content process terminates.
 
-Do not add tab previews, favicon fetching, animated effects, automatic
-suspension, or session restoration.
+Defer reordering, grouping, pinned tabs, tab previews, favicon fetching,
+animated effects, automatic suspension, recently closed tabs, and session
+restoration. These are not part of the approved minimal Phase 5 slice.
 
 ### Tests
 
-- Unit tests for selection after closing the first, middle, selected, and last
-  tab.
-- Unit tests for reorder and command routing.
-- UI tests for tab creation, switching, closing, and shortcuts.
-- Verify that a direct pointer-activated target-blank HTTP or HTTPS anchor opens a
-  foreground tab while every scripted, form-driven, background, and tab-under
-  path remains denied.
-- Verify bookmark creation captures the selected tab and bookmark opening
-  targets the selected tab.
-- Verify switching does not reload a resident page.
-- Verify every new tab receives active content rules and that per-site
-  exception changes behave correctly across multiple resident tabs.
-- Verify quit/relaunch restores window geometry but no URL or tab.
-- Rerun bookmark load/search and blocker attachment checks alongside the
-  ten-tab switching benchmark.
-- One-hundred-cycle tab churn and leak test.
-- Content-process termination recovery test where automation permits.
+Automated coverage is implemented for:
+
+- Tab-manager selection after background and foreground insertion, closing the
+  selected middle or last tab, closing a background tab, and replacing the sole
+  tab with a fresh identity.
+- Command-T, the new-tab button, tab selection, Command-W, neighboring-tab
+  selection, and fresh-blank last-tab behavior.
+- Independent resident WKWebViews, selected-tab command routing, shared profile
+  data storage, delegate cleanup on close, and a document sentinel proving that
+  switching does not reload a resident page.
+- Closed tabs clear transient navigation and blocker state, and queued delegate
+  callbacks cannot repopulate state from a closed or non-owned WebView.
+- A genuine Command-click opening an HTTP(S) link in a background tab while the
+  source remains selected, including verification that the background tab
+  inherits active content rules.
+- An unmodified direct target-blank HTTP(S) anchor opening a foreground tab while
+  scripted popups, script-triggered anchors, target-blank forms, unsupported
+  schemes, alternate buttons, and unsupported modifiers remain denied.
+- Quit and relaunch returning to one fresh blank tab without restoring either of
+  two previously open URLs.
+
+Final automated evidence:
+
+- Debug and Release unit suites each pass all 149 tests. The complete Debug and
+  Release UI suites each pass all 13 workflows.
+- Bookmark load/filter/search p95 values are 63.501/18.757/19.183 ms. Blocker
+  attachment and policy coverage remain green in both unit configurations.
+- New blank-tab chrome p95 is 6.514 ms against 100 ms. Selection with ten
+  loaded resident tabs is 2.983 ms against 50 ms.
+- Ten real resident tabs use 186.8 MiB aggregate p95 memory against 1 GiB and
+  0.013% mean idle CPU against 1%. The one-hundred-cycle tab-manager regression
+  and full-app Command-T/Command-W churn probe pass; the full-app probe's
+  second-half absolute-memory median is 11.04% below its first-half median.
+  WebContent termination and the no-history container audit also pass.
+- The final normal-session user tab smoke test passed on 2026-07-28, completing
+  acceptance of the checkpoint.
 
 ### Exit criteria
 
@@ -667,6 +707,8 @@ suspension, or session restoration.
 - Closed tab URLs are not retained.
 - Adding tabs cannot bypass content rules, site policy, or the popup-denial
   invariant.
+- Command-click background loading cannot change or reload the selected source
+  tab, and relaunch cannot restore prior tabs or URLs.
 - Existing-tab switching meets the latency budget, including while bookmark
   and blocker state are loaded.
 - Memory settles after churn and remains within the locked tab budget.

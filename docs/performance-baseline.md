@@ -2,8 +2,8 @@
 
 Status: Phase 1 historical baseline retained; Phase 2 baseline locked; Phase 3
 bookmark gates pass; Phase 4 blocker, full-app launch/navigation/scrolling, and
-one/ten-view resource gates pass; Phase 4 is complete and Phase 5 is next but
-has not begun
+one/ten-view resource gates pass; minimal Phase 5 tab performance, churn, and
+ten-tab resource gates pass
 Last updated: 2026-07-28
 
 ## Environment
@@ -24,6 +24,7 @@ Last updated: 2026-07-28
 | Window-geometry checkpoint | `aa8ee6a`; manually approved |
 | Phase 4 accepted production-app state | Final implementation working tree based on `89888ce`; `.build/PerformanceResults.X3uvqP` passed before later performance-test/fixture-only hardening |
 | Hardened scrolling state | Production app code unchanged; only performance test, deterministic fixture, and documentation changed before `.build/PerformanceResults.j6rcfP` |
+| Phase 5 measured state | Minimal tab implementation working tree; split final launch, interaction, tab, and resource artifacts listed below |
 
 Raw results stay in ignored `.build` directories and are never uploaded. Phase
 2 is also recorded in `TestSupport/phase2_performance_baseline.json`, which is
@@ -356,6 +357,63 @@ Artifacts:
 Both runs retained a stable attributed Browser/WebKit process count. The
 ten-view scenario remains a synthetic scalability probe, not a tab benchmark.
 
+## Phase 5 minimal-tab results
+
+The Phase 5 run used the optimized application with the normal performance
+profile. A launch-only result holds 20 fresh process launches; a separate
+interaction result holds the established navigation, command, and scrolling
+workload; and a tab result holds 20 new-tab samples plus 50 switches while ten
+real resident tabs were loaded from the deterministic fixture.
+
+| Metric | Median | p95 | Maximum | Gate |
+| --- | ---: | ---: | ---: | --- |
+| Application first frame | 338.592 ms | 366.466 ms | 375.979 ms | Pass: p50 <= 500 ms; p95 <= 800 ms |
+| Native initial-window presentation | 95.559 ms | 112.507 ms | 114.089 ms | Reported |
+| First blank navigation | 84.995 ms | 97.708 ms | 100.279 ms | Pass: p95 <= 1.2 seconds |
+| New blank-tab chrome | 3.932 ms | 6.514 ms | 6.553 ms | Pass: p95 <= 100 ms |
+| Selection with ten resident loaded tabs | 2.627 ms | 2.983 ms | 3.477 ms | Pass: p95 <= 50 ms |
+| Address submission | 0.198 ms | 0.357 ms | 0.453 ms | Pass: p95 <= 50 ms |
+| Back/forward command | 0.125 ms | 0.195 ms | 0.203 ms | Pass: p95 <= 50 ms |
+| Deterministic local navigation | 11.793 ms | 19.856 ms | 21.077 ms | Reported |
+
+All ten genuine controlled-scroll samples recorded zero browser hitches. The
+10,000-bookmark load, manager-filter, and repository-search p95 values were
+63.501, 18.757, and 19.183 ms, respectively, and remain within their locked
+100/50/50 ms limits.
+
+Artifacts:
+
+- `.build/LaunchRetry-20260728-0738.xcresult`
+- `.build/InteractionPerfFocused-20260728-0744.xcresult`
+- `.build/TabCreationFinal-20260728-0842.xcresult`
+- `.build/TabSelectionFinal-20260728-0840.xcresult`
+- `.build/PerformanceResults.OIXrv2/bookmark-benchmark.log`
+
+The initial combined attempt exposed padded whitespace in the optimized
+runner's accessibility representation of the focused address field. The focus
+preflight now uses one typed key and trims only surrounding accessibility
+whitespace; it still proves that keyboard input reaches the launch-focused
+field without a click. The final 20-launch result passed every sample.
+
+`make resource-ten` now creates ten actual TabController-owned resident tabs,
+each with its normal WebViewFactory profile and loaded deterministic page.
+
+| Scenario | Samples | Minimum | Median | p95 | Maximum | Process count | Gate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Ten resident tabs, aggregate memory | 10 | 171.6 MiB | 184.2 MiB | 186.8 MiB | 186.8 MiB | 13 | Pass: p95 <= 1 GiB |
+| Ten resident tabs, aggregate idle CPU | 30 seconds | 0.000% | 0.000% | 0.100% | 0.300% | 13 | Pass: mean 0.013% < 1% |
+
+Artifact: `.build/ResourceBaseline.v10.euHb4k/summary.json`.
+
+The full-app churn gate performed exactly 100 Command-T/Command-W cycles in
+ten measured batches of ten. Absolute Browser memory had a 62,932 kB median
+across the first five batches and a 55,985 kB median across the last five, an
+11.04% decrease. This passes the gate requiring the second-half median to remain
+no more than 10% above the first-half median. Monotonic growth is retained as a
+diagnostic rather than a hard assertion; the ten-resident-tab resource gate
+above remains the absolute-memory ceiling. Artifact:
+`.build/TabChurnFinal-20260728-0836.xcresult`.
+
 ## Locked budgets
 
 The provisional absolute budgets remain realistic and are now locked:
@@ -363,6 +421,8 @@ The provisional absolute budgets remain realistic and are now locked:
 - terminated launch to interactive address field: p50 at or below 500 ms and
   p95 at or below 800 ms;
 - usable initial blank web view: p95 at or below 1.2 seconds;
+- create and focus a new blank tab: browser-chrome p95 at or below 100 ms;
+- switch among ten resident lightweight tabs: p95 at or below 50 ms;
 - settled aggregate CPU: average below 1 percent over 30 seconds;
 - one settled blank tab: aggregate p95 at or below 300 MiB;
 - ten settled deterministic lightweight tabs: aggregate p95 at or below 1 GiB;
