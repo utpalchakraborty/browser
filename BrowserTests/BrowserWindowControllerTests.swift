@@ -31,6 +31,47 @@ final class BrowserWindowControllerTests: XCTestCase {
         XCTAssertEqual(controller.tabIDs, [controller.selectedTabID])
     }
 
+    func testCommandReturnCompletesSingleLabelAsDotComAddress() throws {
+        let controller = BrowserWindowController()
+        let window = try XCTUnwrap(controller.window)
+        let chromeView = try XCTUnwrap(
+            window.contentView as? BrowserChromeView
+        )
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+
+        chromeView.addressField.stringValue = "stale"
+        window.makeFirstResponder(chromeView.addressField)
+        let editor = try XCTUnwrap(chromeView.addressField.currentEditor())
+        editor.string = "x"
+        let commandReturn = try XCTUnwrap(
+            NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: .command,
+                timestamp: 0,
+                windowNumber: window.windowNumber,
+                context: nil,
+                characters: "\r",
+                charactersIgnoringModifiers: "\r",
+                isARepeat: false,
+                keyCode: 36
+            )
+        )
+
+        XCTAssertTrue(
+            chromeView.addressField.performKeyEquivalent(with: commandReturn)
+        )
+        XCTAssertEqual(chromeView.addressField.stringValue, "https://x.com")
+
+        XCTAssertTrue(window.makeFirstResponder(nil))
+        chromeView.addressField.stringValue = "x"
+        XCTAssertFalse(
+            chromeView.addressField.performKeyEquivalent(with: commandReturn)
+        )
+        XCTAssertEqual(chromeView.addressField.stringValue, "x")
+    }
+
     func testNewAndCloseTabUseFreshBlankLastTabBehavior() throws {
         let controller = BrowserWindowController()
         let window = try XCTUnwrap(controller.window)

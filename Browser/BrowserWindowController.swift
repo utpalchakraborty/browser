@@ -87,6 +87,9 @@ final class BrowserWindowController: NSWindowController,
         chromeView.addressField.delegate = self
         chromeView.addressField.target = self
         chromeView.addressField.action = #selector(submitAddress(_:))
+        chromeView.addressField.onCommandReturn = { [weak self] input in
+            self?.submitAddress(input, intent: .completeDotCom)
+        }
 
         chromeView.backButton.target = self
         chromeView.backButton.action = #selector(goBack(_:))
@@ -456,7 +459,20 @@ final class BrowserWindowController: NSWindowController,
 
     @objc
     func submitAddress(_ sender: Any?) {
-        switch addressInterpreter.interpret(chromeView.addressField.stringValue) {
+        submitAddress(
+            chromeView.addressField.stringValue,
+            intent: .standard
+        )
+    }
+
+    private func submitAddress(
+        _ input: String,
+        intent: AddressSubmissionIntent
+    ) {
+        switch addressInterpreter.interpret(
+            input,
+            intent: intent
+        ) {
         case let .navigate(url):
             navigate(to: url)
         case let .failure(error):

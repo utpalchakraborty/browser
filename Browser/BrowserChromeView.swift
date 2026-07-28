@@ -1,12 +1,41 @@
 import AppKit
 
 @MainActor
+final class BrowserAddressField: NSTextField {
+    var onCommandReturn: ((String) -> Void)?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let intentModifiers = event.modifierFlags.intersection([
+            .command,
+            .option,
+            .control,
+            .shift,
+        ])
+        let isReturnKey = event.keyCode == 36 || event.keyCode == 76
+
+        guard
+            let editor = currentEditor(),
+            window?.firstResponder === editor,
+            event.type == .keyDown,
+            intentModifiers == .command,
+            isReturnKey,
+            let onCommandReturn
+        else {
+            return super.performKeyEquivalent(with: event)
+        }
+
+        onCommandReturn(editor.string)
+        return true
+    }
+}
+
+@MainActor
 final class BrowserChromeView: NSView {
     let tabStrip = BrowserTabStripView()
     let backButton = NSButton()
     let forwardButton = NSButton()
     let reloadStopButton = NSButton()
-    let addressField = NSTextField()
+    let addressField = BrowserAddressField()
     let bookmarkButton = NSButton()
     let progressIndicator = NSProgressIndicator()
     let pageContainer = NSView()

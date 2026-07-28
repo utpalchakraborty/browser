@@ -39,6 +39,11 @@ nonisolated enum AddressInterpretation: Equatable, Sendable {
     case failure(AddressInterpretationError)
 }
 
+nonisolated enum AddressSubmissionIntent: Equatable, Sendable {
+    case standard
+    case completeDotCom
+}
+
 nonisolated enum AddressInterpretationError: Error, Equatable, Sendable {
     case emptyInput
     case malformedURL
@@ -65,10 +70,20 @@ nonisolated struct AddressInterpreter: Sendable {
         self.searchProvider = searchProvider
     }
 
-    func interpret(_ input: String) -> AddressInterpretation {
+    func interpret(
+        _ input: String,
+        intent: AddressSubmissionIntent = .standard
+    ) -> AddressInterpretation {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return .failure(.emptyInput)
+        }
+
+        if
+            intent == .completeDotCom,
+            let url = Self.dotComShortcutURL(from: trimmed)
+        {
+            return .navigate(url)
         }
 
         if let explicitScheme = Self.explicitScheme(in: trimmed) {
@@ -97,6 +112,18 @@ nonisolated struct AddressInterpreter: Sendable {
         }
 
         return .navigate(searchProvider.searchURL(for: trimmed))
+    }
+
+    private static func dotComShortcutURL(from input: String) -> URL? {
+        guard
+            !input.contains("."),
+            input.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
+            input.rangeOfCharacter(from: CharacterSet(charactersIn: "/:?#")) == nil
+        else {
+            return nil
+        }
+
+        return inferredHTTPSURL(from: "\(input).com")
     }
 
     private static func validWebURL(from input: String) -> URL? {
