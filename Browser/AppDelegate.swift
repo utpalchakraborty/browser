@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     static func main() {
         let application = NSApplication.shared
+        installApplicationIcon(on: application)
         let delegate = AppDelegate()
         application.delegate = delegate
         withExtendedLifetime(delegate) {
@@ -203,6 +204,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldRestoreApplicationState(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    private static func installApplicationIcon(on application: NSApplication) {
+        guard
+            let iconURL = Bundle.main.url(
+                forResource: "AppIcon",
+                withExtension: "icns"
+            ),
+            let icon = NSImage(contentsOf: iconURL)
+        else {
+            return
+        }
+
+        application.applicationIconImage = icon
     }
 
     static func windowFrameAutosaveName(
