@@ -5,7 +5,7 @@ DESTINATION := platform=macOS,arch=arm64
 
 .PHONY: build release run verify-release test release-test ui-test performance-build performance \
 	profile-probe blocker-benchmark resource-one resource-ten network-audit \
-	webcontent-termination check clean
+	container-audit container-audit-test webcontent-termination check clean
 
 build:
 	xcodebuild \
@@ -62,6 +62,12 @@ resource-ten: verify-release
 
 network-audit: verify-release
 	./scripts/audit-blank-network.sh
+
+container-audit:
+	./scripts/audit-container.sh
+
+container-audit-test:
+	./scripts/test-audit-container.sh
 
 webcontent-termination: verify-release
 	./scripts/probe-webcontent-termination.sh

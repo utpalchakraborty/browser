@@ -72,6 +72,10 @@ final class ContentBlockerService {
         try await ruleStore.removeContentRuleList(forIdentifier: identifier)
     }
 
+    func availableCachedRuleListIdentifiers() async -> [String] {
+        await ruleStore.availableIdentifiers()?.sorted() ?? []
+    }
+
     func replace(
         _ previousRuleList: WKContentRuleList?,
         with newRuleList: WKContentRuleList,

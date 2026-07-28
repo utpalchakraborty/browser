@@ -29,6 +29,46 @@ final class AppDelegateContentBlockingTests: XCTestCase {
         )
     }
 
+    func testWebsiteDataResetIsRestrictedToExplicitUITestLaunches() {
+        XCTAssertFalse(
+            AppDelegate.shouldResetWebsiteData(arguments: ["Browser"])
+        )
+        XCTAssertFalse(
+            AppDelegate.shouldResetWebsiteData(
+                arguments: ["Browser", "--reset-ui-test-website-data"]
+            )
+        )
+        XCTAssertFalse(
+            AppDelegate.shouldResetWebsiteData(
+                arguments: ["Browser", "--ui-test-profile"]
+            )
+        )
+        XCTAssertTrue(
+            AppDelegate.shouldResetWebsiteData(
+                arguments: [
+                    "Browser",
+                    "--ui-test-profile",
+                    "--reset-ui-test-website-data",
+                ]
+            )
+        )
+    }
+
+    func testCompiledArtifactResetScopeIsIsolatedByLaunchMode() {
+        XCTAssertEqual(
+            AppDelegate.contentBlockerArtifactResetScope(
+                arguments: ["Browser"]
+            ),
+            .all
+        )
+        XCTAssertEqual(
+            AppDelegate.contentBlockerArtifactResetScope(
+                arguments: ["Browser", "--ui-test-profile"]
+            ),
+            .identifierPrefix("browser-ui-test-")
+        )
+    }
+
     func testUITestRuleSourceIsDeterministicAndSeparateFromProduction() async throws {
         let uiTestSources = try AppDelegate.contentBlockerRuleSources(
             arguments: ["Browser", "--ui-test-profile"]

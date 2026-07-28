@@ -279,6 +279,106 @@ final class ContentBlockerRuleSetResolverTests: XCTestCase {
         XCTAssertNil(cached)
     }
 
+    func testResetCompiledArtifactsRemovesEveryCachedIdentifierAndState() async throws {
+        let fixture = try makeFixture()
+        defer { cleanUp(fixture) }
+        let currentRules = try ContentBlockerService.probeRules(
+            blockedURLFilter: ".*/reset-current[.]js",
+            exceptionTopURLFilters: []
+        )
+        let orphanRules = try ContentBlockerService.probeRules(
+            blockedURLFilter: ".*/reset-orphan[.]js",
+            exceptionTopURLFilters: []
+        )
+        let currentIdentifier = ContentBlockerService.versionedIdentifier(
+            namespace: "reset-current",
+            encodedRules: currentRules
+        )
+        let orphanIdentifier = ContentBlockerService.versionedIdentifier(
+            namespace: "reset-orphan",
+            encodedRules: orphanRules
+        )
+        _ = try await fixture.service.compileRuleList(
+            identifier: currentIdentifier,
+            encodedRules: currentRules
+        )
+        _ = try await fixture.service.compileRuleList(
+            identifier: orphanIdentifier,
+            encodedRules: orphanRules
+        )
+        fixture.stateStore.recordLastValidIdentifiers([currentIdentifier])
+
+        let result = try await fixture.resolver.resetCompiledArtifacts()
+
+        XCTAssertEqual(
+            result.removedIdentifiers,
+            [currentIdentifier, orphanIdentifier].sorted()
+        )
+        let remainingIdentifiers =
+            await fixture.service.availableCachedRuleListIdentifiers()
+        XCTAssertEqual(remainingIdentifiers, [])
+        XCTAssertNil(fixture.stateStore.lastValidIdentifiers())
+        let cachedCurrent = try await fixture.service.cachedRuleList(
+            identifier: currentIdentifier
+        )
+        let cachedOrphan = try await fixture.service.cachedRuleList(
+            identifier: orphanIdentifier
+        )
+        XCTAssertNil(cachedCurrent)
+        XCTAssertNil(cachedOrphan)
+    }
+
+    func testScopedResetRemovesOnlyUITestIdentifiersAndState() async throws {
+        let fixture = try makeFixture()
+        defer { cleanUp(fixture) }
+        let productionRules = try ContentBlockerService.probeRules(
+            blockedURLFilter: ".*/production[.]js",
+            exceptionTopURLFilters: []
+        )
+        let uiTestRules = try ContentBlockerService.probeRules(
+            blockedURLFilter: ".*/ui-test[.]js",
+            exceptionTopURLFilters: []
+        )
+        let productionIdentifier = ContentBlockerService.versionedIdentifier(
+            namespace: "browser-adguard-base-v1",
+            encodedRules: productionRules
+        )
+        let uiTestIdentifier = ContentBlockerService.versionedIdentifier(
+            namespace: "browser-ui-test-content-blocking-v1",
+            encodedRules: uiTestRules
+        )
+        _ = try await fixture.service.compileRuleList(
+            identifier: productionIdentifier,
+            encodedRules: productionRules
+        )
+        _ = try await fixture.service.compileRuleList(
+            identifier: uiTestIdentifier,
+            encodedRules: uiTestRules
+        )
+        fixture.stateStore.recordLastValidIdentifiers([uiTestIdentifier])
+        let resolver = ContentBlockerRuleSetResolver(
+            service: fixture.service,
+            stateStore: fixture.stateStore,
+            artifactResetScope: .identifierPrefix("browser-ui-test-")
+        )
+
+        let result = try await resolver.resetCompiledArtifacts()
+        let remainingIdentifiers =
+            await fixture.service.availableCachedRuleListIdentifiers()
+        let cachedProduction = try await fixture.service.cachedRuleList(
+            identifier: productionIdentifier
+        )
+        let cachedUITest = try await fixture.service.cachedRuleList(
+            identifier: uiTestIdentifier
+        )
+
+        XCTAssertEqual(result.removedIdentifiers, [uiTestIdentifier])
+        XCTAssertEqual(remainingIdentifiers, [productionIdentifier])
+        XCTAssertNil(fixture.stateStore.lastValidIdentifiers())
+        XCTAssertNotNil(cachedProduction)
+        XCTAssertNil(cachedUITest)
+    }
+
     private func makeSource(
         namespace: String,
         rules: String,

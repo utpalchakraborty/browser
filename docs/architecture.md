@@ -1,9 +1,8 @@
 # Browser Architecture
 
-Status: Approved; the first Phase 4 ad/tracker-blocking and popup-suppression
-checkpoint is complete; website-data privacy controls remain Phase 4; tabs
-remain Phase 5
-Last updated: 2026-07-27
+Status: Approved; Phase 4 is complete with every acceptance gate green; Phase 5
+is next and has not begun
+Last updated: 2026-07-28
 
 ## 1. Purpose
 
@@ -119,7 +118,10 @@ flowchart TD
     Resolver --> RuleStore[WKContentRuleListStore]
     Window --> Blocking
 
-    Profile -. Remaining Phase 4 .-> PrivacyUI[Website-data controls]
+    App --> DataController[WebsiteDataController]
+    DataController --> Store
+    Window --> PrivacyUI[Website-data privacy window]
+    PrivacyUI --> DataController
     Window -. Phase 5 .-> Tabs[TabManager]
     Tabs -. Phase 5 .-> Tab[TabController per resident tab]
 ~~~
@@ -142,22 +144,26 @@ behavior:
 AppDelegate owns process lifecycle, creates windows, installs application menus,
 disables AppKit state restoration so macOS cannot reconstruct browser windows,
 web content, or tab URLs, creates the production BookmarkRepository after the
-native window has been presented, and prepares the production
-ContentBlockingCoordinator after native chrome is interactive.
+native window has been presented, and begins production blocker preparation
+after native chrome is interactive but before lazily creating the WebKit
+profile. It then creates WebsiteDataController from that profile's data store in
+both ready and fail-closed blocker outcomes.
 
 BrowserWindowController owns one browser window, including:
 
 - address field and navigation buttons;
 - the current single-page WKWebView container;
 - keyboard focus and command routing;
-- configuration of native frame autosave for the main window; and
+- configuration of native frame autosave for the main window;
 - bookmark-button state and presentation of the bookmark editor and manager;
 - strengthening blocker policy before ordinary navigation, relaxing exact-host
   policy only after the winning commit, and ignoring stale callbacks;
 - applying a user-requested current-site exception before its explicit reload
-  so document-level matches remain recoverable; and
+  so document-level matches remain recoverable;
 - Privacy-menu status, exception toggling, explicit reload, and visible
-  unavailable presentation.
+  unavailable presentation;
+- presentation of the website-data privacy window; and
+- coordination of global site-exception and compiled-artifact reset actions.
 
 There is no global navigation singleton. Phase 3 routes commands to the current
 page in the key browser window; Phase 5 will route the same semantic commands
@@ -181,8 +187,10 @@ ContentBlockerService, ContentBlockerStateStore, and
 ContentBlockerSitePolicyStore behind one main-actor ContentBlockingCoordinator.
 The coordinator prepares one complete rule set and applies its lists to each
 WKWebView's WKUserContentController according to the current exact-host policy.
-WebsiteDataController operates against BrowserProfile's data store; its user
-interface remains the next Phase 4 slice.
+WebsiteDataController operates against BrowserProfile's data store.
+WebsiteDataPrivacyWindowController renders immutable snapshots and invokes only
+that controller's public WebKit deletion boundary; it never reads WebKit's
+private on-disk representation.
 
 The normal profile is intentionally persistent because the user wants cookies
 that survive relaunch and can be inspected. A future private window would use a
@@ -285,22 +293,39 @@ Bookmarks are deliberately saved URLs and therefore are not browsing history.
 ### Website data and cookies
 
 WebsiteDataController is the sole API-facing layer for WebKit website data.
+WebKit does not expose an atomic cookie-and-record snapshot, so the controller
+enumerates both public APIs and returns one immutable presentation snapshot.
+Every deletion re-enumerates authoritative WebKit state before the UI reports a
+result.
 
 Cookie operations use WKHTTPCookieStore to:
 
 - enumerate cookies;
 - show domain, name, path, expiry/session status, Secure, and HttpOnly metadata
-  when available;
-- delete one cookie; and
-- refresh the displayed snapshot after asynchronous deletion completes.
+  plus SameSite when available;
+- delete one cookie;
+- delete every cookie with the exact displayed cookie-domain identity; and
+- delete all cookies without claiming that broader website data was removed.
 
-WKWebsiteDataStore records are used to show which domains retain other data,
-including caches, local storage, IndexedDB, and service-worker data. The user
-can delete selected site data, all data for a domain, or all website data.
+Cookies are grouped by their normalized exact cookie domain. That hierarchy is
+deliberately separate from WKWebsiteDataStore records, whose display names may
+group data using public-suffix rules. Records show WebKit's reported categories,
+including caches, local storage, IndexedDB, and service-worker data, without
+pretending that their contents or an exact domain mapping are inspectable. The
+user can delete one selected record or all WebKit-exposed website data.
 
-The UI must not imply that deleting cookies also deletes every other storage
-mechanism. It will expose both cookie-level controls and broader site-data
-controls.
+Cookie values are masked by default and revealed only for an explicitly
+selected cookie. Values do not participate in search, are never copied
+automatically, and are scrubbed from the hidden accessibility object when the
+selection or mode changes, a refresh or mutation starts, or the window closes.
+The UI distinguishes cookie-only controls from broader site-data controls and
+confirms every destructive action.
+
+Deletion can race an open page recreating its storage. A remaining cookie or
+record is therefore a visible reconciliation result, not success. Closing the
+manager cancels presentation-only refresh work, but an already-confirmed
+destructive mutation continues to completion and reconciliation so its outcome
+is not left ambiguously partial.
 
 Persistent caching remains enabled because disabling it would significantly
 hurt performance and compatibility. Private browsing or explicit clearing is
@@ -346,6 +371,16 @@ state. Post-fix Debug and Release unit and UI suites, the production benchmark,
 and Release-package verification are green. On 2026-07-27, the user reported
 that the blocker and popup checkpoint works in hands-on use and approved it.
 
+The privacy window can reset every explicit exact-host exception. If the
+committed page was excepted, Browser reapplies the protected policy before its
+reload. A separate confirmed action enumerates and removes locally compiled
+rule-list artifacts and clears last-valid recovery identifiers. Prepared rule
+objects already attached to resident content controllers remain in memory, and
+the immutable pinned rules remain in the signed bundle; the next launch rebuilds
+the local artifacts before remote navigation. Production reset covers the
+production rule store, while UI-test reset uses an identifier prefix so an
+isolated test cannot remove production compiled lists.
+
 The browser will not proxy traffic or run arbitrary filter code for each
 request.
 
@@ -358,11 +393,11 @@ request.
 | Bookmarks | BookmarkRepository | Explicitly saved pages | Delete individually; reset active files; remove active and preserved corrupt files while Browser is quit for complete erasure |
 | Required preferences | UserDefaults | Search provider | Reset settings |
 | Main window frame | UserDefaults through AppKit frame autosave | Reopen at the last usable size and location | Reset settings |
-| Last-valid blocker identifiers | ContentBlockerStateStore in UserDefaults | Transactional recovery bookkeeping; contains no navigated URL | Reset UI remains Phase 4 work |
-| Per-site blocker exceptions | ContentBlockerSitePolicyStore in UserDefaults | Explicit exact-host user choices | Toggle current host; reset-all UI remains Phase 4 work |
-| Cookies | WKWebsiteDataStore | Login and website behavior | Underlying deletion proven; Phase 4 privacy UI pending |
-| Caches and other site data | WKWebsiteDataStore | Performance and website functionality | Underlying deletion proven; Phase 4 privacy UI pending |
-| Compiled blocker data | WKContentRuleListStore | Fast local blocking | Reset UI remains Phase 4 work |
+| Last-valid blocker identifiers | ContentBlockerStateStore in UserDefaults | Transactional recovery bookkeeping; contains no navigated URL | Privacy > Manage Website Data > Delete Compiled Blocking Rules |
+| Per-site blocker exceptions | ContentBlockerSitePolicyStore in UserDefaults | Explicit exact-host user choices | Toggle the current host or reset every exception in Manage Website Data |
+| Cookies | WKWebsiteDataStore | Login and website behavior | Delete one, one exact domain's cookies, or all cookies; selected-record/global full-data actions may also remove cookies |
+| Caches and other site data | WKWebsiteDataStore | Performance and website functionality | Delete the selected WebKit record or all website data |
+| Compiled blocker data | WKContentRuleListStore | Fast local blocking | Delete compiled blocking rules; rebuild pinned rules locally on next launch |
 | Blocker manifest, rules, notices, and license | Signed app-bundle resources | Pinned local protection and provenance | Replace or remove the app |
 
 No application-owned file may contain a passive list of navigated URLs.
@@ -497,7 +532,9 @@ the budget is deliberately revised with recorded evidence.
   writable WebKit state to the window controller.
 - Asynchronous deletion, compilation, and persistence operations expose
   explicit in-progress and error states; the UI never assumes completion.
-- Cancellation is required when a window, tab, or management view closes.
+- Closing a window, tab, or management view cancels presentation-only work and
+  releases its observers. A destructive mutation already confirmed by the user
+  must instead finish and reconcile authoritative state.
 
 A typical navigation flow is:
 
@@ -565,9 +602,12 @@ dependency-injection infrastructure.
 - Navigation, external-scheme, and popup policy.
 - Bookmark encoding, atomic replacement, recovery, and migrations.
 - Privacy-default configuration.
+- Website-data snapshot grouping, value redaction, deletion reconciliation,
+  privacy-window state, and cross-operation busy-state behavior.
 - Blocker manifest/hash validation, cache/fallback state, exact-host policy,
-  production-list compilation, and attachment behavior. The pinned converter
-  remains an offline developer tool rather than runtime code.
+  production-list compilation, attachment behavior, global resets, and
+  production/UI-test reset isolation. The pinned converter remains an offline
+  developer tool rather than runtime code.
 
 ### WebKit integration and UI tests
 
@@ -598,7 +638,9 @@ The test server is not shipped in the application.
 - App process and WebKit child-process memory.
 - Rule-list lookup and attachment.
 - Repeated tab open/close churn.
-- Controlled-page scrolling and UI hitches.
+- Controlled-page scrolling and UI hitches, with a visible top/moved fixture
+  marker that proves a preflight swipe changes document position and that the
+  fixture returns to the top before metric collection.
 
 The project tests its integration and overhead. It does not attempt to retest
 WebKit's HTML, CSS, or JavaScript implementation.
@@ -686,10 +728,16 @@ Phase 1 established:
 3. locked absolute CPU, memory, launch, and cached-rule attachment budgets in
    [performance-baseline.md](performance-baseline.md).
 
-The completed first Phase 4 checkpoint converted and bundled those pinned
-sources, verified their hashes and production semantics, and implemented the
-exact-host exception plus popup backstop. Website-data UI, global blocker reset
-controls, and full Phase 4 resource and network gates remain.
+Phase 4 converted and bundled those pinned sources, verified their hashes and
+production semantics, implemented the exact-host exception and popup backstop,
+and added website-data inspection/deletion plus global blocker reset controls.
+Debug and Release functional suites, Release packaging, cross-process profile,
+blocker, WebContent cleanup, container, launch/navigation/scrolling, and
+one/ten-view resource gates pass. The final machine-privileged blank-network
+audit also passes: its exact Browser/WebKit attribution filter captured 8
+positive-control outbound packets, then 0 outbound packets during 31 seconds of
+production blank launch/idle. Artifact:
+`.build/NetworkAudit.HxyZ8u/result.txt`. Phase 5 is next and has not begun.
 
 The measured WebKit API and platform risk decision is recorded in
 [phase-1-risk-report.md](phase-1-risk-report.md).

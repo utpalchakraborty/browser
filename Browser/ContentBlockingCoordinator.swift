@@ -20,6 +20,7 @@ final class ContentBlockingCoordinator {
     private let sitePolicyStore: ContentBlockerSitePolicyStore
     private var preparedRuleSet: PreparedContentBlockerRuleSet?
     private var attachedStateByController = [ObjectIdentifier: Bool]()
+    private var isResettingCompiledArtifacts = false
 
     private(set) var availability: ContentBlockingAvailability = .preparing
 
@@ -33,6 +34,18 @@ final class ContentBlockingCoordinator {
 
     var isReady: Bool {
         preparedRuleSet != nil
+    }
+
+    var siteExceptionHosts: [String] {
+        sitePolicyStore.allExceptionHosts()
+    }
+
+    var siteExceptionCount: Int {
+        siteExceptionHosts.count
+    }
+
+    var canResetCompiledArtifacts: Bool {
+        availability != .preparing && !isResettingCompiledArtifacts
     }
 
     func prepare(currentSources: [ContentBlockerRuleSource]) async {
@@ -110,6 +123,23 @@ final class ContentBlockingCoordinator {
 
     func resetSiteExceptions() {
         sitePolicyStore.reset()
+    }
+
+    func resetCompiledArtifacts() async throws
+        -> ContentBlockerArtifactResetResult
+    {
+        guard availability != .preparing else {
+            throw ContentBlockerArtifactResetError.preparationInProgress
+        }
+        guard !isResettingCompiledArtifacts else {
+            throw ContentBlockerArtifactResetError.resetInProgress
+        }
+
+        isResettingCompiledArtifacts = true
+        defer {
+            isResettingCompiledArtifacts = false
+        }
+        return try await resolver.resetCompiledArtifacts()
     }
 
     func forget(_ contentController: WKUserContentController) {

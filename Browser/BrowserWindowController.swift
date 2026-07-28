@@ -35,6 +35,11 @@ final class BrowserWindowController: NSWindowController,
     private var bookmarkCoordinator: BookmarkCoordinator?
     private var bookmarkManagerWindowController: BookmarkManagerWindowController?
     private var bookmarkEditorSheetController: BookmarkEditorSheetController?
+    private var websiteDataController: WebsiteDataController?
+    private var websiteDataPrivacyWindowController:
+        WebsiteDataPrivacyWindowController?
+    private var compiledBlockerResetTask: Task<Void, Never>?
+    private var compiledBlockerArtifactsWereReset = false
 
     private var observedURL: URL?
     private var observedTitle: String?
@@ -182,6 +187,17 @@ final class BrowserWindowController: NSWindowController,
 
     func contentBlockingPreparationDidFail() {
         presentContentBlockingUnavailable()
+        updatePrivacyBlockingResetState(
+            isBusy: false,
+            statusMessage: "Blocking rules are unavailable. Website-data controls remain available."
+        )
+    }
+
+    func contentBlockingPreparationDidFinish() {
+        updatePrivacyBlockingResetState(
+            isBusy: false,
+            statusMessage: nil
+        )
     }
 
     func startBookmarks(
@@ -199,6 +215,15 @@ final class BrowserWindowController: NSWindowController,
         bookmarkCoordinator = coordinator
         renderBookmarkState()
         coordinator.start(resetOnLaunch: resetOnLaunch)
+    }
+
+    func startWebsiteDataManagement(
+        controller: WebsiteDataController
+    ) {
+        guard websiteDataController == nil else {
+            return
+        }
+        websiteDataController = controller
     }
 
     var currentBookmarkPageCandidate: BookmarkPageCandidate? {
@@ -381,6 +406,30 @@ final class BrowserWindowController: NSWindowController,
     }
 
     @objc
+    func showWebsiteData(_ sender: Any?) {
+        guard websiteDataController != nil else {
+            NSSound.beep()
+            return
+        }
+        let manager = websiteDataPrivacyManager()
+        let blockingStatusMessage: String?
+        switch contentBlockingCoordinator?.availability {
+        case .unavailable, nil:
+            blockingStatusMessage = "Blocking rules are unavailable. Website-data controls remain available."
+        case .preparing:
+            blockingStatusMessage = "Blocking rules are still preparing. Website-data controls remain available."
+        case .active, .activeLastValidRules:
+            blockingStatusMessage = nil
+        }
+        updatePrivacyBlockingResetState(
+            isBusy: compiledBlockerResetTask != nil
+                || contentBlockingCoordinator?.availability == .preparing,
+            statusMessage: blockingStatusMessage
+        )
+        manager.showWindow(sender)
+    }
+
+    @objc
     func contentBlockingStatus(_ sender: Any?) {}
 
     @objc
@@ -426,6 +475,10 @@ final class BrowserWindowController: NSWindowController,
         }
         bindContentBlockingNavigation(navigation)
         window?.makeFirstResponder(webView)
+        updatePrivacyBlockingResetState(
+            isBusy: false,
+            statusMessage: nil
+        )
     }
 
     @objc
@@ -464,6 +517,8 @@ final class BrowserWindowController: NSWindowController,
                 && currentBookmarkPageCandidate != nil
         case #selector(showBookmarks(_:)):
             return bookmarkCoordinator != nil
+        case #selector(showWebsiteData(_:)):
+            return websiteDataController != nil
         case #selector(contentBlockingStatus(_:)):
             menuItem.title = contentBlockingStatusTitle
             return false
@@ -509,6 +564,9 @@ final class BrowserWindowController: NSWindowController,
         finishSubmittedNavigation(accessibilityValue: "Cancelled")
         bookmarkCoordinator?.cancel()
         bookmarkManagerWindowController?.close()
+        websiteDataPrivacyWindowController?.close()
+        compiledBlockerResetTask?.cancel()
+        compiledBlockerResetTask = nil
         if
             let editorWindow = bookmarkEditorSheetController?.window,
             let parentWindow = editorWindow.sheetParent
@@ -1096,6 +1154,183 @@ final class BrowserWindowController: NSWindowController,
                 && currentBookmarkPageCandidate != nil
         )
         bookmarkManagerWindowController?.refreshCurrentPageAvailability()
+    }
+
+    private func websiteDataPrivacyManager()
+        -> WebsiteDataPrivacyWindowController
+    {
+        if let websiteDataPrivacyWindowController {
+            return websiteDataPrivacyWindowController
+        }
+        guard let websiteDataController else {
+            preconditionFailure("Website data management was not started")
+        }
+
+        let manager = WebsiteDataPrivacyWindowController(
+            dataController: websiteDataController
+        )
+        manager.onResetAllSiteExceptions = { [weak self] in
+            self?.resetAllContentBlockingSiteExceptions()
+        }
+        manager.onDeleteCompiledBlockingRules = { [weak self] in
+            self?.deleteCompiledContentBlockingArtifacts()
+        }
+        websiteDataPrivacyWindowController = manager
+        return manager
+    }
+
+    private func resetAllContentBlockingSiteExceptions() {
+        guard let contentBlockingCoordinator else {
+            updatePrivacyBlockingResetState(
+                isBusy: false,
+                statusMessage: "Blocking data is unavailable in this launch mode."
+            )
+            return
+        }
+        let previousCount = contentBlockingCoordinator.siteExceptionCount
+        guard previousCount > 0 else {
+            updatePrivacyBlockingResetState(
+                isBusy: false,
+                statusMessage: "There are no site exceptions to reset."
+            )
+            return
+        }
+
+        let currentWasExcepted = contentBlockingCoordinator.snapshot(
+            for: committedURL
+        ).isException
+        if currentWasExcepted,
+           (contentBlockingNavigationState.hasActiveNavigation
+                || webView == nil
+                || committedURL == nil)
+        {
+            updatePrivacyBlockingResetState(
+                isBusy: false,
+                statusMessage: "Wait for the current navigation to finish, then reset the exceptions."
+            )
+            return
+        }
+
+        updatePrivacyBlockingResetState(
+            isBusy: true,
+            statusMessage: "Resetting site exceptions…"
+        )
+        contentBlockingCoordinator.resetSiteExceptions()
+
+        var statusMessage = previousCount == 1
+            ? "The site exception was reset."
+            : "All \(previousCount) site exceptions were reset."
+        if currentWasExcepted,
+           let webView,
+           let committedURL
+        {
+            guard applyContentBlockingPolicy(
+                for: committedURL,
+                in: webView,
+                mode: .exact
+            ) else {
+                presentContentBlockingUnavailable()
+                updatePrivacyBlockingResetState(
+                    isBusy: false,
+                    statusMessage: "The exceptions were reset, but protection could not be attached to the current page."
+                )
+                return
+            }
+            hideError()
+            beginContentBlockingNavigationRequest()
+            let navigation = webView.reload()
+            bindContentBlockingNavigation(navigation)
+            if navigation == nil {
+                statusMessage += " Protection is attached; reload the current page manually."
+            } else {
+                statusMessage += " The current page is reloading with protection enabled."
+            }
+        }
+
+        updatePrivacyBlockingResetState(
+            isBusy: false,
+            statusMessage: statusMessage
+        )
+    }
+
+    private func deleteCompiledContentBlockingArtifacts() {
+        guard
+            compiledBlockerResetTask == nil,
+            !compiledBlockerArtifactsWereReset,
+            let contentBlockingCoordinator,
+            contentBlockingCoordinator.canResetCompiledArtifacts
+        else {
+            updatePrivacyBlockingResetState(
+                isBusy: false,
+                statusMessage: "Compiled blocking rules cannot be reset right now."
+            )
+            return
+        }
+
+        updatePrivacyBlockingResetState(
+            isBusy: true,
+            statusMessage: "Deleting compiled blocking rules…"
+        )
+        compiledBlockerResetTask = Task { [weak self] in
+            guard let self else {
+                return
+            }
+            do {
+                let result = try await contentBlockingCoordinator
+                    .resetCompiledArtifacts()
+                compiledBlockerArtifactsWereReset = true
+                let removedCount = result.removedIdentifiers.count
+                let removalDescription = removedCount == 1
+                    ? "1 compiled rule list was deleted."
+                    : "\(removedCount) compiled rule lists were deleted."
+                compiledBlockerResetTask = nil
+                updatePrivacyBlockingResetState(
+                    isBusy: false,
+                    statusMessage: removalDescription
+                        + " Current pages remain protected; bundled rules will rebuild locally on the next launch."
+                )
+            } catch {
+                compiledBlockerResetTask = nil
+                updatePrivacyBlockingResetState(
+                    isBusy: false,
+                    statusMessage: Self.compiledBlockerResetFailureMessage(
+                        error
+                    )
+                )
+            }
+        }
+    }
+
+    private func updatePrivacyBlockingResetState(
+        isBusy: Bool,
+        statusMessage: String?
+    ) {
+        guard let manager = websiteDataPrivacyWindowController else {
+            return
+        }
+        manager.updateBlockingResetState(
+            exceptionCount: contentBlockingCoordinator?.siteExceptionCount ?? 0,
+            canResetCompiledArtifacts: contentBlockingCoordinator?
+                .canResetCompiledArtifacts == true
+                && !compiledBlockerArtifactsWereReset,
+            isBusy: isBusy,
+            statusMessage: statusMessage
+        )
+    }
+
+    private static func compiledBlockerResetFailureMessage(
+        _ error: Error
+    ) -> String {
+        switch error as? ContentBlockerArtifactResetError {
+        case .preparationInProgress:
+            return "Blocking rules are still preparing. Try again when protection is active."
+        case .resetInProgress:
+            return "Compiled blocking rules are already being deleted."
+        case let .cachedIdentifiersRemain(identifiers):
+            return "WebKit kept \(identifiers.count) compiled rule lists. Current protection remains active; try again after relaunching Browser."
+        case nil:
+            return "Compiled blocking rules could not be deleted. Current protection remains active."
+        }
     }
 
     private func bookmarkManager() -> BookmarkManagerWindowController {

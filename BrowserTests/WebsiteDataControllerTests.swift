@@ -189,6 +189,109 @@ final class WebsiteDataControllerTests: XCTestCase {
         )
     }
 
+    func testVerifiedCookieDeletionUsesStableIdentity() async throws {
+        let dataStore = WKWebsiteDataStore.nonPersistent()
+        let dataController = WebsiteDataController(
+            websiteDataStore: dataStore
+        )
+        let cookie = try makeCookie(
+            header: "stable-id=secret; Domain=.example.com; Path=/account; Max-Age=3600; HttpOnly; SameSite=Lax",
+            url: "https://example.com/account"
+        )
+        await dataStore.httpCookieStore.setCookie(cookie)
+
+        let before = await dataController.snapshot()
+        let identifier = WebsiteCookieID(cookie: cookie)
+        XCTAssertTrue(before.containsCookie(id: identifier))
+
+        let result = await dataController.deleteCookie(withID: identifier)
+
+        XCTAssertTrue(result.didRemoveRequestedData)
+        XCTAssertFalse(result.snapshot.containsCookie(id: identifier))
+        XCTAssertFalse(result.message.contains(cookie.value))
+    }
+
+    func testVerifiedWebsiteRecordAndGlobalDeletionRefreshSnapshots() async throws {
+        let identifier = UUID(
+            uuidString: "A1000000-0000-4000-8000-000000000003"
+        )!
+        let profile = BrowserProfile(dataStoreIdentifier: identifier)
+        let dataController = WebsiteDataController(
+            websiteDataStore: profile.websiteDataStore
+        )
+        await dataController.clearAllWebsiteData()
+
+        var webView: WKWebView? = profile.webViewFactory.makeWebView()
+        try await WebViewNavigationWaiter().load(
+            Phase1Fixture.url("/storage"),
+            in: try XCTUnwrap(webView)
+        )
+        _ = try await webView?.callAsyncJavaScript(
+            "return await window.storageReady;",
+            arguments: [:],
+            in: nil,
+            contentWorld: .page
+        )
+        webView = nil
+
+        let before = await dataController.snapshot()
+        let fixtureRecord = try XCTUnwrap(
+            before.records.first {
+                $0.displayName.contains("127.0.0.1")
+            }
+        )
+        XCTAssertFalse(fixtureRecord.categories.isEmpty)
+
+        let domainResult = await dataController.deleteWebsiteData(
+            for: fixtureRecord.id
+        )
+        XCTAssertTrue(domainResult.didRemoveRequestedData)
+        XCTAssertFalse(domainResult.snapshot.containsRecord(id: fixtureRecord.id))
+
+        webView = profile.webViewFactory.makeWebView()
+        try await WebViewNavigationWaiter().load(
+            Phase1Fixture.url("/cookie/set"),
+            in: try XCTUnwrap(webView)
+        )
+        webView = nil
+        let recreatedSnapshot = await dataController.snapshot()
+        XCTAssertGreaterThan(recreatedSnapshot.cookieCount, 0)
+
+        let globalResult = await dataController.clearAllWebsiteDataAndVerify()
+        XCTAssertTrue(globalResult.didRemoveRequestedData)
+        XCTAssertEqual(globalResult.snapshot, .empty)
+    }
+
+    func testExactCookieDomainDeletionDoesNotDeleteSubdomainCookies() async throws {
+        let dataStore = WKWebsiteDataStore.nonPersistent()
+        let dataController = WebsiteDataController(
+            websiteDataStore: dataStore
+        )
+        let parentCookie = try makeCookie(
+            header: "parent=one; Domain=.example.com; Path=/; Max-Age=3600",
+            url: "https://example.com/"
+        )
+        let childCookie = try makeCookie(
+            header: "child=two; Domain=sub.example.com; Path=/; Max-Age=3600",
+            url: "https://sub.example.com/"
+        )
+        await dataStore.httpCookieStore.setCookie(parentCookie)
+        await dataStore.httpCookieStore.setCookie(childCookie)
+
+        let result = await dataController.deleteCookies(
+            exactDomain: "EXAMPLE.com."
+        )
+
+        XCTAssertTrue(result.didRemoveRequestedData)
+        XCTAssertFalse(result.snapshot.containsCookies(exactDomain: "example.com"))
+        XCTAssertTrue(
+            result.snapshot.containsCookie(
+                id: WebsiteCookieID(cookie: childCookie)
+            )
+        )
+        XCTAssertTrue(result.message.contains("Other website data was left intact"))
+    }
+
     func testCookieDomainMatchingDoesNotCrossDomainBoundaries() {
         XCTAssertTrue(
             WebsiteDataController.cookieDomain(
@@ -219,6 +322,22 @@ final class WebsiteDataControllerTests: XCTestCase {
                 "127.0.0.1",
                 isApplicableToHost: "127.0.0.1"
             )
+        )
+        XCTAssertFalse(
+            WebsiteDataController.cookieDomain(
+                "",
+                isApplicableToHost: ""
+            )
+        )
+    }
+
+    private func makeCookie(header: String, url: String) throws -> HTTPCookie {
+        let parsedURL = try XCTUnwrap(URL(string: url))
+        return try XCTUnwrap(
+            HTTPCookie.cookies(
+                withResponseHeaderFields: ["Set-Cookie": header],
+                for: parsedURL
+            ).first
         )
     }
 }

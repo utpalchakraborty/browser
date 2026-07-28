@@ -226,6 +226,88 @@ final class BrowserLaunchPerformanceTests: XCTestCase {
         application.terminate()
     }
 
+    func testControlledScrollingResponsiveness() {
+        let application = XCUIApplication()
+        application.launchArguments = [
+            "--performance-test",
+            "-ApplePersistenceIgnoreState",
+            "YES",
+        ]
+        application.launch()
+
+        let addressField = application.descendants(matching: .any)[
+            "BrowserAddressField"
+        ]
+        let webView = application.descendants(matching: .any)[
+            "BrowserWebView"
+        ]
+        XCTAssertTrue(addressField.waitForExistence(timeout: 5))
+        XCTAssertTrue(webView.waitForExistence(timeout: 5))
+        waitForButtonLabel(
+            application.buttons["BrowserReloadStopButton"],
+            containing: "Reload"
+        )
+
+        let url = Self.fixtureOrigin + "/performance/scroll"
+        application.activate()
+        application.typeKey("l", modifierFlags: .command)
+        addressField.typeKey("a", modifierFlags: .command)
+        addressField.typeText(url)
+        addressField.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(
+            application.staticTexts["Controlled Scroll Fixture"]
+                .waitForExistence(timeout: 5)
+        )
+        waitForValue(addressField, equalTo: url)
+
+        var scrollsDown = true
+        // WKWebView exposes its root accessibility group as a non-hittable
+        // element on macOS. A coordinate inside its visible bounds avoids
+        // XCUIElement's hit-point lookup while still synthesizing a real
+        // scrolling gesture through the web view.
+        let scrollCoordinate = webView.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)
+        )
+
+        // Prove outside the measured block that this coordinate drives the
+        // document rather than a no-op accessibility surface. Restore the
+        // fixture to its deterministic top state before collecting hitches.
+        let topMarker = application.staticTexts["Scroll position top"]
+        let movedMarker = application.staticTexts["Scroll position moved"]
+        XCTAssertTrue(topMarker.waitForExistence(timeout: 5))
+        scrollCoordinate.swipeUp()
+        XCTAssertTrue(
+            movedMarker.waitForExistence(timeout: 5),
+            "The scroll preflight gesture did not move the fixture document."
+        )
+        for _ in 0 ..< 5 where !topMarker.exists {
+            scrollCoordinate.swipeDown()
+        }
+        XCTAssertTrue(
+            topMarker.waitForExistence(timeout: 5),
+            "The scroll preflight did not restore the fixture to the top."
+        )
+
+        let options = XCTMeasureOptions()
+        options.iterationCount = 10
+        measure(
+            metrics: [
+                XCTHitchMetric(application: application),
+                XCTOSSignpostMetric.scrollingAndDecelerationMetric,
+            ],
+            options: options
+        ) {
+            if scrollsDown {
+                scrollCoordinate.swipeUp()
+            } else {
+                scrollCoordinate.swipeDown()
+            }
+            scrollsDown.toggle()
+        }
+
+        application.terminate()
+    }
+
     private func assertFocused(
         _ element: XCUIElement,
         file: StaticString = #filePath,

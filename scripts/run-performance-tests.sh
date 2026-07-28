@@ -111,6 +111,7 @@ xcodebuild \
     -parallel-testing-enabled NO \
     -only-testing:BrowserPerformanceTests/BrowserLaunchPerformanceTests/testDeterministicLocalNavigationAndCommandResponse \
     -only-testing:BrowserPerformanceTests/BrowserLaunchPerformanceTests/testBackAndForwardCommandResponse \
+    -only-testing:BrowserPerformanceTests/BrowserLaunchPerformanceTests/testControlledScrollingResponsiveness \
     -resultBundlePath "$interaction_result_bundle" \
     test-without-building
 

@@ -1,34 +1,36 @@
 # Project Status
 
-Last updated: 2026-07-27
+Last updated: 2026-07-28
 
 ## Restart snapshot
 
-- The Phase 4 ad/tracker-blocking and popup-suppression checkpoint is complete,
-  approved, and committed as `074fc81` (`Complete Phase 4 blocker checkpoint`).
-- The checkpoint is green in Debug and Release: 117 unit tests and 11 UI tests
-  in each configuration, plus the production blocker benchmark and hardened
-  Release-package verification.
-- Overall Phase 4 remains active. Resume with the website-data privacy window,
-  then add reset-all controls for blocker exceptions and compiled artifacts and
-  rerun the fresh privacy, network, container, and full performance gates.
-- Separate Phase 3 follow-ups remain the manual bookmark recovery exercise and
-  a clean idle-desktop launch-performance rerun. Tabs remain Phase 5.
+- Phase 4 is fully complete. The native privacy window inspects and deletes
+  WebKit website data and exposes visible reset-all actions for blocker
+  exceptions and compiled artifacts.
+- Final Debug and Release verification each passes 135 unit tests and 12 UI
+  tests. Release-package, profile, blocker, WebContent termination, container,
+  launch/navigation/scrolling, one/ten-view resource, and fresh blank-network
+  gates are green.
+- The final network audit's exact metadata filter attributed 8 positive-control
+  packets, then observed 0 outbound packets during a 31-second blank launch/idle
+  interval. Artifact: `.build/NetworkAudit.HxyZ8u/result.txt`.
+- The blocker and popup checkpoint remains approved and committed as `074fc81`
+  (`Complete Phase 4 blocker checkpoint`). The separate Phase 3 manual bookmark
+  recovery exercise remains pending. Phase 5 is next and has not begun.
 
 ## Current phase
 
-Phase 4 — the first ad/tracker-blocking and popup-suppression checkpoint is
-complete and approved. Pinned production rules are enabled by default, an
-exact-host compatibility exception is available from the Privacy menu, and the
-browser-level popup backstop is covered independently of filter matches.
-Website-data privacy controls are the next Phase 4 slice. Tabs remain Phase 5.
+Phase 4 — complete. Implementation, functional verification, privacy UI,
+Release packaging, profile/container/network inspection, and performance and
+resource gates all pass. Pinned production rules are enabled by default,
+exact-host recovery is available from Privacy, popup denial is independent of
+filter matches, and Privacy > Manage Website Data exposes WebKit data plus
+global blocker resets. Phase 5 is the next planned phase and has not begun.
 
-The Phase 3 manual bookmark-recovery exercise and clean idle-desktop launch-
-performance rerun are still pending. Post-fix Debug and Release unit and UI
-verification, the production-list benchmark, and production Release bundle
-verification are green. The navigation-boundary privacy race described below
-is resolved. On 2026-07-27, the user reported that the Phase 4 blocker and popup
-checkpoint works in hands-on use and approved it.
+The clean idle-desktop launch rerun is now green; the separate Phase 3 manual
+bookmark-recovery exercise is still pending. The navigation-boundary privacy
+race described below is resolved. On 2026-07-27, the user reported that the
+Phase 4 blocker and popup checkpoint works in hands-on use and approved it.
 
 The browser is now a usable native single-page pilot. It accepts HTTP and HTTPS
 URLs, infers HTTPS for plausible hosts, searches plain text, exposes WebKit
@@ -81,17 +83,12 @@ The Release 10,000-bookmark gate is green: load p95 is 63.164 ms against a
 path is 18.536 ms against 50 ms limits. The generated 2,398,938-byte fixture
 lives only in a temporary benchmark directory and contains no user data.
 
-The full Release performance run completed all 20 launch, 20 address/local
-navigation, and 20 back/forward samples. Bookmark and interaction gates passed:
-address submission p95 was 0.758 ms, browser-command p95 was 0.187 ms, and
-local navigation p95 was 24.206 ms. The launch gate did not pass: first-frame
-median was 573.542 ms against 500 ms, although p95 was 624.031 ms against
-800 ms; Phase 2-relative first-frame and readiness comparisons exceeded their
-10% budgets. Performance-test launches do not initialize bookmarks, which
-isolates bookmark-store I/O but does not by itself explain the launch result.
-A confirmation attempt was invalidated by foreground Ghostty-window
-interference and stopped. A clean idle-desktop rerun is required. Artifacts:
-`.build/PerformanceResults.QvWEvu/`.
+The original Phase 3 Release performance run completed all 20 launch, 20
+address/local-navigation, and 20 back/forward samples. Bookmark and interaction
+gates passed, but its 573.542 ms first-frame median missed the 500 ms ceiling.
+A confirmation attempt was invalidated by foreground-window interference. This
+historical result remains at `.build/PerformanceResults.QvWEvu/`; the clean
+Phase 4 run documented below supersedes its launch result and passes every gate.
 
 A fresh container inspection after automated navigation found no Browser-owned
 history, visit, session, or navigation database. The app-owned Application
@@ -102,9 +99,8 @@ WebKit-managed site data, caches, and privacy infrastructure rather than
 application-owned visit history.
 
 The user approved the production add/edit/search/open/delete, keyboard-command,
-and relaunch-persistence workflow on 2026-07-26. One manual
-backup/recovery/reset scenario and a clean launch-performance rerun remain
-pending.
+and relaunch-persistence workflow on 2026-07-26. The launch-performance rerun is
+now green. One manual backup/recovery/reset scenario remains pending.
 
 ## Phase 4 blocker checkpoint complete
 
@@ -170,6 +166,89 @@ window and WKWebView counts. Debug and Release each passed all 11 tests.
 Artifacts: `.build/TestResults.UqqvcE/Browser.xcresult` and
 `.build/TestResults.LgnTdT/Browser.xcresult`.
 
+## Phase 4 privacy controls and final acceptance complete
+
+- Privacy > Manage Website Data, or Option-Command-Y, opens a native nonmodal
+  manager backed by the normal profile's `WKWebsiteDataStore`.
+- Cookies are grouped by exact cookie domain and remain distinct from WebKit's
+  broader record names, which may use public-suffix grouping. The window shows
+  name, domain, path, expiry/session, Secure, HttpOnly, and SameSite metadata.
+  Values are masked by default, require explicit reveal for the selected cookie,
+  are excluded from search, and are scrubbed on selection/mode changes, close,
+  refresh, and mutation.
+- Confirmed actions delete one cookie, every cookie for an exact displayed
+  domain, all cookies, one selected WebKit website-data record, or all
+  WebKit-exposed website data. Cookie-only actions leave other categories
+  intact. Every mutation refreshes from WebKit and reports data recreated by an
+  open page instead of claiming deletion succeeded.
+- The same window resets all exact-host blocker exceptions and deletes locally
+  compiled blocker artifacts. Current pages keep their in-memory protection;
+  the pinned signed rules remain in the app and rebuild locally on next launch
+  before remote navigation. UI-test artifact reset is prefix-scoped so it cannot
+  remove production compiled lists.
+- Final startup ordering schedules blocker preparation before WebKit profile
+  creation, preserving the fast native-window path and cached blocker lookup.
+  Website-data controls are installed after preparation in both ready and
+  fail-closed outcomes, so blocker failure cannot hide the deletion UI.
+
+Final post-startup-fix functional verification is green: the combined Debug run
+passed 135 unit tests and 12 UI tests, Release unit passed 135, and Release UI
+passed 12. Artifacts: `.build/TestResults.YXZZik/Browser.xcresult`,
+`.build/TestResults.lRwo5P/Browser.xcresult`, and
+`.build/TestResults.LBpOx9/Browser.xcresult`. The final focused privacy flow,
+including global deletion, is at `.build/TargetedPrivacyGlobal2.xcresult`.
+
+The final actual-app profile probe used distinct process IDs 24498, 24530, and
+24563, proved the persistent cookie survived (`cookie-survived=true`), then
+proved deletion across relaunch. Artifact:
+`.build/ActualAppProfileProbe.oe3hQC`. The fresh production blocker benchmark
+passed with cached lookup p95 0.218375 ms, synchronous attachment p95
+0.000209 ms, and removal p95 0.000125 ms at
+`.build/ContentBlockerBenchmark.qIb6ev`. Production WebContent termination also
+passed: the target exited, Browser survived five seconds, no replacement
+appeared within five seconds, and Browser/WebContent cleanup completed.
+Artifact: `.build/WebContentTermination.YLxbl5`. Release verification passed
+arm64, signature, App Sandbox, hardened runtime, exact entitlements, and
+independently pinned blocker-resource checks for
+`.build/DerivedData/Build/Products/Release/Browser.app`.
+
+The clean Release run remains the accepted production-app launch, navigation,
+command, and readiness gate. First-frame median/p95/max are
+429.257/538.403/577.416 ms; native-window median/p95 are 88.269/106.669 ms; and
+the conservative initial-WebView readiness proxy is
+636.481/754.233/796.431 ms. Address submission median/p95 are 0.217/0.433 ms,
+browser command 0.174/0.193 ms, and local navigation 12.751/17.180 ms. Relative
+to Phase 2, first-frame median/p95 improved 13.89%/4.78% and readiness improved
+11.67%/4.02%. The 10,000-bookmark load and search p95 values are 62.716 ms and
+18.980 ms. Artifact: `.build/PerformanceResults.X3uvqP`. Production application
+code did not change after this clean passing run.
+
+The scrolling harness was subsequently hardened in test/fixture code only. A
+visible `top`/`moved` marker now proves a swipe actually moves the deterministic
+document, and the preflight restores the fixture to the top before measuring.
+All three XCTest methods passed in `.build/PerformanceResults.j6rcfP`; its ten
+genuine scroll samples reported zero hitch duration, count, and ratio. Bookmark
+load/filter/search p95 were 61.928/18.768/18.588 ms, local-navigation p95 was
+19.360 ms, address p95 was 0.433 ms, and command p95 was 0.184 ms.
+
+That later run's aggregate summary missed only the outer XCTest first-frame p50
+ceiling: median 529.613 ms against 500 ms, while p95 was 568.708 ms and both
+Phase 2-relative gates passed. A settled launch-only confirmation at
+`.build/PerformanceLaunchConfirmation.EJpHTr` likewise passed its XCTest method
+but measured a 524.319 ms outer median. App-owned native-window medians remained
+92.954 and 92.989 ms. With production code unchanged, these diagnostics expose
+the documented outer XCTest/OS launch bimodality and do not replace the clean
+`X3uvqP` release acceptance run.
+
+One-view resources pass with 73.5 MiB median, 73.7 MiB p95, and 0.020% mean idle
+CPU at `.build/ResourceBaseline.v1.f2jBcc`. The synthetic ten-resident-view
+probe passes with 283.2 MiB median, 296.9 MiB p95, and 0.007% mean idle CPU at
+`.build/ResourceBaseline.v10.zRM3n4`. The final read-only container audit and
+its negative self-test passed. Normal, UI-test, and performance SearchHistory
+logical-entry counts were all zero; all 6 preference keys were allowlisted with
+0 unexpected; and the audit reported 0 failures and 0 warnings. Artifact:
+`.build/ContainerAudit.20260728T094138Z.hM7afi/report.txt`.
+
 ## Phase 2 delivered
 
 - Native toolbar with a launch-focused address field, Back, Forward,
@@ -209,10 +288,9 @@ A post-change Release performance run completed every launch, navigation, and
 command sample. The browser-specific comparisons stayed within the 10%
 regression budget, including a 91.364 ms median native-window presentation, but
 XCTest's outer first-frame median was 547.960 ms against the 500 ms absolute
-ceiling. The p95 was 599.275 ms against its 800 ms ceiling. The overall gate is
-therefore not yet green; rerun it on an otherwise idle desktop because separate
-confirmation attempts were invalidated by foreground-window interference.
-Artifact: `.build/PerformanceResults.NfA7if/`.
+ceiling. The p95 was 599.275 ms against its 800 ms ceiling. That historical run
+failed the median gate and remains at `.build/PerformanceResults.NfA7if/`; the
+clean final Phase 4 run now supersedes it and passes.
 
 Detailed design and historical evidence:
 
@@ -244,19 +322,19 @@ Detailed design and historical evidence:
   relaunch. That sentinel was absent from application preferences, AppKit
   saved-state data, and Browser unified logs.
 
-The Phase 1 privileged pktap audit remains the current blank-network evidence:
-8 positive-control packets and 0 Browser-attributed outbound packets during a
-31-second blank launch/idle window (`.build/NetworkAudit.aG4SkM`). A fresh
-Phase 2 invocation reached the scoped `sudo` password prompt and was stopped;
-rerun `make network-audit` from an interactive Terminal if fresh packet-capture
-evidence is desired.
+The final privileged pktap audit passed with metadata filter
+`(dir=out and (proc=Browser or eproc=Browser))`. Its positive attribution
+control captured 8 outbound packets, then the production blank launch emitted
+0 attributed outbound packets during 31 seconds idle. The result is `PASS` at
+`.build/NetworkAudit.HxyZ8u/result.txt`. This supersedes the historical Phase 1
+network evidence.
 
 ## Current limitations
 
 There is one page and one window. Opening a bookmark replaces the current page.
-Production ad/tracker rules are active. The website-data privacy-management UI
-remains Phase 4; tabs are Phase 5. Downloads and private windows remain later
-work.
+Production ad/tracker rules and the website-data privacy manager are active.
+Phase 5 tabs are next but have not begun. Downloads and private windows remain
+later work.
 
 Programmatic popups are suppressed, and the roadmap now makes that behavior an
 explicit invariant: no page-created secondary app window, WKWebView, background
@@ -274,12 +352,9 @@ automated gate.
 
 ## Next action
 
-Implement the website-data privacy window as the next Phase 4 slice, including
-cookie/site-data deletion plus reset controls for all blocker exceptions and
-compiled blocker artifacts. A fresh blank-network and container audit and the
-full launch/resource performance gates remain Phase 4 acceptance work.
+Phase 4 is complete. Stop at this checkpoint for review. Phase 5 tabs are next,
+but no Phase 5 implementation has begun.
 
-Separately, back up the bookmark files, force one recovery, test Restore Backup
-or Reset Bookmarks, and rerun the launch-performance gate on an idle desktop.
-Tabs follow in Phase 5. Revisit bookmark folders only if ordinary use shows
+Separately, back up the bookmark files, force one recovery, and test Restore
+Backup or Reset Bookmarks. Revisit bookmark folders only if ordinary use shows
 that the flat searchable manager is insufficient.

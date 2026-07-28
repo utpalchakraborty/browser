@@ -4,6 +4,62 @@ import XCTest
 
 @MainActor
 final class ContentBlockerServiceTests: XCTestCase {
+    func testAvailableCachedRuleListIdentifiersReflectsPrivateStore() async throws {
+        let ruleStoreDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "ContentBlockerServiceTests.\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer {
+            try? FileManager.default.removeItem(at: ruleStoreDirectory)
+        }
+        let ruleStore = try XCTUnwrap(
+            WKContentRuleListStore(url: ruleStoreDirectory)
+        )
+        let service = ContentBlockerService(ruleStore: ruleStore)
+        let firstRules = try ContentBlockerService.probeRules(
+            blockedURLFilter: ".*/enumerated-first[.]js",
+            exceptionTopURLFilters: []
+        )
+        let secondRules = try ContentBlockerService.probeRules(
+            blockedURLFilter: ".*/enumerated-second[.]js",
+            exceptionTopURLFilters: []
+        )
+        let firstIdentifier = ContentBlockerService.versionedIdentifier(
+            namespace: "enumerated-first",
+            encodedRules: firstRules
+        )
+        let secondIdentifier = ContentBlockerService.versionedIdentifier(
+            namespace: "enumerated-second",
+            encodedRules: secondRules
+        )
+
+        let initialIdentifiers =
+            await service.availableCachedRuleListIdentifiers()
+        XCTAssertEqual(initialIdentifiers, [])
+        _ = try await service.compileRuleList(
+            identifier: secondIdentifier,
+            encodedRules: secondRules
+        )
+        _ = try await service.compileRuleList(
+            identifier: firstIdentifier,
+            encodedRules: firstRules
+        )
+
+        let compiledIdentifiers =
+            await service.availableCachedRuleListIdentifiers()
+        XCTAssertEqual(
+            compiledIdentifiers,
+            [firstIdentifier, secondIdentifier].sorted()
+        )
+
+        try await service.removeCachedRuleList(identifier: firstIdentifier)
+        try await service.removeCachedRuleList(identifier: secondIdentifier)
+        let remainingIdentifiers =
+            await service.availableCachedRuleListIdentifiers()
+        XCTAssertEqual(remainingIdentifiers, [])
+    }
+
     func testCompiledRulesBlockNormallyAndAllowSiteException() async throws {
         let blockingRules = try ContentBlockerService.probeRules(
             blockedURLFilter: ".*/blocked[.]js",

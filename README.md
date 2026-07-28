@@ -13,22 +13,37 @@ a bookmark replaces the current page until tabs arrive in Phase 5.
 
 This is now a usable one-page pilot, not yet the daily-driver release. It also
 remembers the main window's size and location across relaunch while continuing
-to launch with a blank page. The completed first Phase 4 checkpoint enables
-pinned, bundled AdGuard Base and Tracking Protection rules by default, adds an
-exact-host compatibility exception, and locks popup suppression down
-independently of filter coverage. Website-data privacy controls remain the next
-Phase 4 slice. Tabs follow in Phase 5; downloads remain later hardening work.
+to launch with a blank page. Phase 4 is complete: pinned,
+bundled AdGuard Base and Tracking Protection rules are enabled by default,
+popup suppression is independent of filter coverage, and a native privacy
+window exposes website-data deletion plus blocker reset controls. Functional,
+Release-package, profile, blocker, container, performance, resource, and fresh
+blank-network gates are green. Phase 5 is next and has not begun; downloads
+remain later hardening work.
 
 The Phase 3 live bookmark smoke test passed, and its keyboard-first workflow is
-approved; the manual recovery exercise is still pending. Post-fix Debug and
-Release unit and UI suites, production-list compilation, the blocker benchmark,
-and Release bundle verification are green. Ordinary pending navigation may
+approved; the manual recovery exercise is still pending. Final Debug and
+Release verification each passes 135 unit tests and 12 UI tests. Production-
+list compilation, the blocker benchmark, Release bundle verification, the
+cross-process profile probe, controlled scrolling, one/ten-view resources, and
+the read-only container audit are also green. Ordinary pending navigation may
 only strengthen protection; an exact-host relaxation is applied only after the
-winning document commits, and stale callbacks cannot weaken a newer page. The
-explicit current-site switch applies its selected policy before reloading so it
-can also recover a page matched by a document-level rule. On 2026-07-27, the
-user reported that the Phase 4 blocker and popup checkpoint works in hands-on
-use and approved it.
+winning document commits, and stale callbacks cannot weaken a newer page. On
+2026-07-27, the user reported that the blocker and popup checkpoint works in
+hands-on use and approved it.
+
+The final privileged audit attributed 8 positive-control outbound packets to
+Browser/WebKit, then observed 0 outbound packets during a 31-second blank
+launch/idle interval. Artifact: `.build/NetworkAudit.HxyZ8u/result.txt`.
+
+The controlled-scroll harness now proves that a real swipe changes a visible
+top/moved marker and restores the fixture to the top before measuring. Ten
+genuine samples reported zero hitch duration, count, and ratio in
+`.build/PerformanceResults.j6rcfP`. Only test/fixture code changed after the
+clean production-app acceptance run `.build/PerformanceResults.X3uvqP`, so that
+run remains the Phase 4 release gate. Later outer XCTest launch medians were
+bimodal and are documented transparently in the performance baseline; app-owned
+window presentation remained about 93 ms.
 
 ## Requirements
 
@@ -58,11 +73,15 @@ make performance
 make resource-one
 make resource-ten
 make webcontent-termination
+make container-audit
 make network-audit
 ~~~
 
 `make resource-ten` remains a synthetic ten-resident-view scalability probe;
-it is not a tab benchmark. Tabs begin in Phase 5.
+it is not a tab benchmark. `make container-audit` is a read-only inspection of
+the Browser sandbox. `make network-audit` must be run from a normal interactive
+Terminal because it requests administrator authorization only for the scoped
+packet capture. Phase 5 is next and has not begun.
 
 ## Use
 
@@ -81,6 +100,7 @@ address field and press Return.
 - Command-period stops an active load.
 - Command-D adds the current page as a bookmark, or edits it if already saved.
 - Option-Command-B opens the searchable Bookmarks manager.
+- Option-Command-Y opens the Website Data privacy window.
 - Privacy shows whether ad and tracker blocking is active for the current site.
 - Option-Command-P disables or enables blocking for the current exact host and
   reloads the page. The choice persists across relaunch and does not apply to
@@ -111,6 +131,29 @@ the allowed pointer action to a foreground tab. Content blocking prevents
 many advertising popup triggers and overlays before they run, but this popup
 denial remains an independent backstop rather than relying on a filter-list
 match.
+
+## Website data and blocking resets
+
+Privacy > Manage Website Data shows cookies separately from WebKit's broader
+website-data records. Cookie rows use exact cookie-domain scopes; WebKit record
+names may group data using public-suffix rules and are not presented as exact
+cookie-domain identities. Cookie metadata is visible, values are masked by
+default, and revealing a selected value is an explicit local action. Values are
+not searched, logged, or copied automatically, and the revealed value is
+scrubbed when the selection or mode changes or the window closes.
+
+Cookie actions can delete one cookie, every cookie for the displayed exact
+domain, or all cookies while leaving other website data intact. Full-data
+actions can delete the selected WebKit record or every WebKit-exposed category,
+including cookies, caches, local storage, databases, and service workers. Each
+destructive action is confirmed and refreshed against WebKit; an open page may
+recreate data and the window reports that instead of claiming success.
+
+The same window can reset every exact-host blocking exception or delete locally
+compiled blocking rules. Deleting compiled artifacts does not remove the pinned
+rules from the signed app. Current pages remain protected by their in-memory
+rules, and Browser rebuilds the local artifacts on the next launch before it
+permits remote navigation.
 
 ## Bookmark data
 

@@ -148,12 +148,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 else {
                     return
                 }
+                // Preserve the approved first-frame path: opening the named
+                // WebKit store happens only after blocker preparation. The
+                // privacy controller is still installed before the readiness
+                // check so website-data controls remain usable if preparation
+                // fails closed.
+                let profile = self.profile
+                let websiteDataController = WebsiteDataController(
+                    websiteDataStore: profile.websiteDataStore
+                )
+                if Self.shouldResetWebsiteData(arguments: CommandLine.arguments) {
+                    await websiteDataController.clearAllWebsiteData()
+                    guard
+                        self.browserWindowController === controller,
+                        controller.window?.isVisible == true
+                    else {
+                        return
+                    }
+                }
+                controller.startWebsiteDataManagement(
+                    controller: websiteDataController
+                )
+                controller.contentBlockingPreparationDidFinish()
                 guard contentBlockingCoordinator.isReady else {
                     controller.contentBlockingPreparationDidFail()
                     return
                 }
                 controller.startWebViews(
-                    profile: self.profile,
+                    profile: profile,
                     viewCount: Self.performanceViewCount(
                         arguments: ProcessInfo.processInfo.arguments
                     ),
@@ -292,6 +314,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             : "contentBlocker.sitePolicy"
     }
 
+    static func shouldResetWebsiteData(arguments: [String]) -> Bool {
+        arguments.contains("--ui-test-profile")
+            && arguments.contains("--reset-ui-test-website-data")
+    }
+
+    static func contentBlockerArtifactResetScope(
+        arguments: [String]
+    ) -> ContentBlockerArtifactResetScope {
+        arguments.contains("--ui-test-profile")
+            ? .identifierPrefix("browser-ui-test-")
+            : .all
+    }
+
     private static func makeContentBlockingCoordinator(
         arguments: [String]
     ) -> ContentBlockingCoordinator {
@@ -309,7 +344,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return ContentBlockingCoordinator(
             resolver: ContentBlockerRuleSetResolver(
                 service: ContentBlockerService(),
-                stateStore: stateStore
+                stateStore: stateStore,
+                artifactResetScope: contentBlockerArtifactResetScope(
+                    arguments: arguments
+                )
             ),
             sitePolicyStore: sitePolicyStore
         )
@@ -487,6 +525,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         addMenu(bookmarksMenu, to: mainMenu)
 
         let privacyMenu = NSMenu(title: "Privacy")
+        let manageWebsiteDataItem = privacyMenu.addItem(
+            withTitle: "Manage Website Data…",
+            action: #selector(BrowserWindowController.showWebsiteData(_:)),
+            keyEquivalent: "y"
+        )
+        manageWebsiteDataItem.keyEquivalentModifierMask = [.command, .option]
+        manageWebsiteDataItem.target = navigationTarget
+        privacyMenu.addItem(.separator())
         let blockingStatusItem = privacyMenu.addItem(
             withTitle: "Ad & Tracker Blocking: Preparing…",
             action: #selector(BrowserWindowController.contentBlockingStatus(_:)),

@@ -57,6 +57,11 @@ final class ContentBlockingCoordinatorTests: XCTestCase {
             fixture.coordinator.toggleException(for: accountURL),
             accountSite
         )
+        XCTAssertEqual(
+            fixture.coordinator.siteExceptionHosts,
+            ["account.example.com"]
+        )
+        XCTAssertEqual(fixture.coordinator.siteExceptionCount, 1)
         XCTAssertTrue(
             fixture.coordinator.snapshot(
                 for: URL(string: "http://ACCOUNT.EXAMPLE.COM./another-path")
@@ -209,6 +214,130 @@ final class ContentBlockingCoordinatorTests: XCTestCase {
         fixture.coordinator.forget(contentController)
     }
 
+    func testCompiledArtifactResetIsRejectedWhilePreparing() async throws {
+        let fixture = try makeFixture()
+        defer { cleanUp(fixture) }
+        let rules = try ContentBlockerService.probeRules(
+            blockedURLFilter: ".*/reset-while-preparing[.]js",
+            exceptionTopURLFilters: []
+        )
+        let identifier = ContentBlockerService.versionedIdentifier(
+            namespace: "reset-while-preparing",
+            encodedRules: rules
+        )
+        _ = try await fixture.service.compileRuleList(
+            identifier: identifier,
+            encodedRules: rules
+        )
+        fixture.stateStore.recordLastValidIdentifiers([identifier])
+
+        XCTAssertFalse(fixture.coordinator.canResetCompiledArtifacts)
+        do {
+            _ = try await fixture.coordinator.resetCompiledArtifacts()
+            XCTFail("A compiled-artifact reset started while preparation was active")
+        } catch {
+            XCTAssertEqual(
+                error as? ContentBlockerArtifactResetError,
+                .preparationInProgress
+            )
+        }
+
+        let identifiersAfterRejection =
+            await fixture.service.availableCachedRuleListIdentifiers()
+        XCTAssertEqual(identifiersAfterRejection, [identifier])
+        XCTAssertEqual(
+            fixture.stateStore.lastValidIdentifiers(),
+            [identifier]
+        )
+    }
+
+    func testCompiledArtifactResetPreservesActiveRulesAndRecompilesOnRestart() async throws {
+        let fixture = try makeFixture()
+        defer { cleanUp(fixture) }
+        let rules = try ContentBlockerService.probeRules(
+            blockedURLFilter: ".*/assets/blocked[.]js",
+            exceptionTopURLFilters: []
+        )
+        let namespace = "coordinator-reset-recompile"
+        let identifier = ContentBlockerService.versionedIdentifier(
+            namespace: namespace,
+            encodedRules: rules
+        )
+        let loader = ContentBlockerRuleSourceLoadProbe(rules: rules)
+        let source = ContentBlockerRuleSource(
+            namespace: namespace,
+            identifier: identifier,
+            encodedRulesLoader: {
+                await loader.load()
+            }
+        )
+        await fixture.coordinator.prepare(currentSources: [source])
+        let initialLoaderCallCount = await loader.numberOfCalls()
+        XCTAssertEqual(initialLoaderCallCount, 1)
+
+        let pageURL = Phase1Fixture.url("/normal/")
+        let contentController = WKUserContentController()
+        XCTAssertTrue(
+            fixture.coordinator.applyPolicy(
+                to: contentController,
+                for: pageURL
+            )
+        )
+        let profile = BrowserProfile(
+            dataStoreIdentifier: BrowserProfile.testHostDataStoreIdentifier
+        )
+        let webView = profile.webViewFactory.makeWebView(
+            userContentController: contentController
+        )
+        try await WebViewNavigationWaiter().load(pageURL, in: webView)
+        let loadedBeforeReset = try await blockedScriptLoaded(in: webView)
+        XCTAssertFalse(loadedBeforeReset)
+        XCTAssertTrue(fixture.coordinator.canResetCompiledArtifacts)
+
+        let result = try await fixture.coordinator.resetCompiledArtifacts()
+
+        XCTAssertEqual(result.removedIdentifiers, [identifier])
+        XCTAssertTrue(fixture.coordinator.isReady)
+        XCTAssertEqual(fixture.coordinator.availability, .active)
+        XCTAssertTrue(fixture.coordinator.canResetCompiledArtifacts)
+        let identifiersAfterReset =
+            await fixture.service.availableCachedRuleListIdentifiers()
+        XCTAssertEqual(identifiersAfterReset, [])
+        XCTAssertNil(fixture.stateStore.lastValidIdentifiers())
+
+        try await WebViewNavigationWaiter().reload(webView)
+        let loadedAfterReset = try await blockedScriptLoaded(in: webView)
+        XCTAssertFalse(
+            loadedAfterReset,
+            "Deleting the cached copy must not detach the in-memory rules"
+        )
+
+        let reconstructedCoordinator = ContentBlockingCoordinator(
+            resolver: ContentBlockerRuleSetResolver(
+                service: fixture.service,
+                stateStore: fixture.stateStore
+            ),
+            sitePolicyStore: ContentBlockerSitePolicyStore(
+                defaults: fixture.defaults
+            )
+        )
+        await reconstructedCoordinator.prepare(currentSources: [source])
+
+        let reconstructedLoaderCallCount = await loader.numberOfCalls()
+        XCTAssertEqual(reconstructedLoaderCallCount, 2)
+        XCTAssertTrue(reconstructedCoordinator.isReady)
+        XCTAssertEqual(reconstructedCoordinator.availability, .active)
+        XCTAssertEqual(
+            fixture.stateStore.lastValidIdentifiers(),
+            [identifier]
+        )
+        let identifiersAfterReconstruction =
+            await fixture.service.availableCachedRuleListIdentifiers()
+        XCTAssertEqual(identifiersAfterReconstruction, [identifier])
+
+        fixture.coordinator.forget(contentController)
+    }
+
     private func blockedScriptLoaded(in webView: WKWebView) async throws -> Bool {
         let result = try await webView.evaluateJavaScript(
             "Boolean(window.blockedLoaded)"
@@ -276,4 +405,22 @@ private struct ContentBlockingCoordinatorFixture {
     let service: ContentBlockerService
     let stateStore: ContentBlockerStateStore
     let coordinator: ContentBlockingCoordinator
+}
+
+private actor ContentBlockerRuleSourceLoadProbe {
+    private let rules: String
+    private var callCount = 0
+
+    init(rules: String) {
+        self.rules = rules
+    }
+
+    func load() -> String {
+        callCount += 1
+        return rules
+    }
+
+    func numberOfCalls() -> Int {
+        callCount
+    }
 }

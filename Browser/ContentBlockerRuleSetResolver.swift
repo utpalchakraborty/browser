@@ -42,17 +42,44 @@ enum ContentBlockerRuleSetResolverError: Error, Equatable {
     case currentAndLastValidRuleSetsUnavailable
 }
 
+nonisolated struct ContentBlockerArtifactResetResult: Equatable, Sendable {
+    let removedIdentifiers: [String]
+}
+
+nonisolated enum ContentBlockerArtifactResetScope: Equatable, Sendable {
+    case all
+    case identifierPrefix(String)
+
+    func includes(identifier: String) -> Bool {
+        switch self {
+        case .all:
+            return true
+        case let .identifierPrefix(prefix):
+            return !prefix.isEmpty && identifier.hasPrefix(prefix)
+        }
+    }
+}
+
+nonisolated enum ContentBlockerArtifactResetError: Error, Equatable, Sendable {
+    case preparationInProgress
+    case resetInProgress
+    case cachedIdentifiersRemain([String])
+}
+
 @MainActor
 final class ContentBlockerRuleSetResolver {
     private let service: ContentBlockerService
     private let stateStore: ContentBlockerStateStore
+    private let artifactResetScope: ContentBlockerArtifactResetScope
 
     init(
         service: ContentBlockerService,
-        stateStore: ContentBlockerStateStore
+        stateStore: ContentBlockerStateStore,
+        artifactResetScope: ContentBlockerArtifactResetScope = .all
     ) {
         self.service = service
         self.stateStore = stateStore
+        self.artifactResetScope = artifactResetScope
     }
 
     func prepare(
@@ -79,6 +106,38 @@ final class ContentBlockerRuleSetResolver {
                     .currentAndLastValidRuleSetsUnavailable
             }
         }
+    }
+
+    func resetCompiledArtifacts() async throws
+        -> ContentBlockerArtifactResetResult
+    {
+        // The persisted identifiers are recovery bookkeeping for the compiled
+        // artifacts. Clear them even if WebKit cannot remove every cached list
+        // so a later launch never follows a stale fallback pointer.
+        defer {
+            stateStore.reset()
+        }
+
+        let identifiers = await service.availableCachedRuleListIdentifiers()
+            .filter(artifactResetScope.includes(identifier:))
+        for identifier in identifiers {
+            // Continue after an individual failure, then ask WebKit for the
+            // authoritative remaining set before reporting the result.
+            try? await service.removeCachedRuleList(identifier: identifier)
+        }
+
+        let remainingIdentifiers = await service
+            .availableCachedRuleListIdentifiers()
+            .filter(artifactResetScope.includes(identifier:))
+        guard remainingIdentifiers.isEmpty else {
+            throw ContentBlockerArtifactResetError.cachedIdentifiersRemain(
+                remainingIdentifiers
+            )
+        }
+
+        return ContentBlockerArtifactResetResult(
+            removedIdentifiers: identifiers
+        )
     }
 
     private func prepareCurrent(

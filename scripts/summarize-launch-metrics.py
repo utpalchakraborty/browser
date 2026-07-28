@@ -17,6 +17,9 @@ NAVIGATION_METRIC = "Duration (FirstBlankNavigation)"
 ADDRESS_SUBMISSION_METRIC = "Duration (AddressSubmission)"
 BROWSER_COMMAND_METRIC = "Duration (BrowserCommand)"
 LOCAL_NAVIGATION_METRIC = "Duration (LocalFixtureNavigation)"
+SCROLL_HITCH_DURATION_METRIC = "Hitches Total Duration (browser)"
+SCROLL_HITCH_COUNT_METRIC = "Number of Hitches (browser)"
+SCROLL_HITCH_RATIO_METRIC = "Hitch Time Ratio (browser)"
 LAUNCH_TEST = (
     "BrowserLaunchPerformanceTests/testFocusedSinglePageBrowserLaunch()"
 )
@@ -27,8 +30,12 @@ LOCAL_NAVIGATION_TEST = (
 BROWSER_COMMAND_TEST = (
     "BrowserLaunchPerformanceTests/testBackAndForwardCommandResponse()"
 )
+SCROLL_TEST = (
+    "BrowserLaunchPerformanceTests/testControlledScrollingResponsiveness()"
+)
 EXPECTED_LAUNCH_SAMPLE_COUNT = 20
 EXPECTED_NAVIGATION_SAMPLE_COUNT = 20
+EXPECTED_SCROLL_SAMPLE_COUNT = 10
 
 
 def nearest_rank(values, percentile):
@@ -45,6 +52,18 @@ def summarize_seconds(values):
         "mean_ms": statistics.mean(milliseconds),
         "p95_ms": nearest_rank(milliseconds, 0.95),
         "maximum_ms": max(milliseconds),
+    }
+
+
+def summarize_values(values, unit):
+    return {
+        "samples": len(values),
+        "unit": unit,
+        "minimum": min(values),
+        "median": statistics.median(values),
+        "mean": statistics.mean(values),
+        "p95": nearest_rank(values, 0.95),
+        "maximum": max(values),
     }
 
 
@@ -152,6 +171,7 @@ def main():
         LOCAL_NAVIGATION_TEST,
     )
     browser_command_report = report_for_test(reports, BROWSER_COMMAND_TEST)
+    scroll_report = report_for_test(reports, SCROLL_TEST)
     launch_by_name = metrics_by_name(launch_report, LAUNCH_TEST)
     local_navigation_by_name = metrics_by_name(
         local_navigation_report,
@@ -161,6 +181,7 @@ def main():
         browser_command_report,
         BROWSER_COMMAND_TEST,
     )
+    scroll_by_name = metrics_by_name(scroll_report, SCROLL_TEST)
 
     required_launch_metric_names = (
         APPLICATION_METRIC,
@@ -192,6 +213,17 @@ def main():
         EXPECTED_NAVIGATION_SAMPLE_COUNT,
         BROWSER_COMMAND_TEST,
     )
+    required_scroll_metric_names = (
+        SCROLL_HITCH_DURATION_METRIC,
+        SCROLL_HITCH_COUNT_METRIC,
+        SCROLL_HITCH_RATIO_METRIC,
+    )
+    require_metrics(
+        scroll_by_name,
+        required_scroll_metric_names,
+        EXPECTED_SCROLL_SAMPLE_COUNT,
+        SCROLL_TEST,
+    )
 
     launch_summaries = {
         name: summarize_seconds(values)
@@ -204,6 +236,46 @@ def main():
     browser_command_summaries = {
         name: summarize_seconds(values)
         for name, values in browser_command_by_name.items()
+    }
+    scroll_hitch_duration = summarize_seconds(
+        scroll_by_name[SCROLL_HITCH_DURATION_METRIC]
+    )
+    scroll_hitch_duration["maximum_ceiling_ms"] = 100.0
+    scroll_hitch_duration["criterion"] = (
+        "aggregate hitch duration per measured scrolling interaction"
+    )
+    scroll_hitch_duration["passed"] = (
+        scroll_hitch_duration["maximum_ms"]
+        <= scroll_hitch_duration["maximum_ceiling_ms"]
+    )
+    scroll_hitch_count = summarize_values(
+        scroll_by_name[SCROLL_HITCH_COUNT_METRIC],
+        "hitches",
+    )
+    scroll_hitch_count["maximum_ceiling"] = 0.0
+    scroll_hitch_count["criterion"] = (
+        "no detected hitches in any measured scrolling interaction"
+    )
+    scroll_hitch_count["passed"] = (
+        scroll_hitch_count["maximum"]
+        <= scroll_hitch_count["maximum_ceiling"]
+    )
+    scroll_hitch_ratio = summarize_values(
+        scroll_by_name[SCROLL_HITCH_RATIO_METRIC],
+        "ms per s",
+    )
+    scroll_hitch_ratio["maximum_ceiling"] = 0.0
+    scroll_hitch_ratio["criterion"] = (
+        "zero hitch time in every measured scrolling interaction"
+    )
+    scroll_hitch_ratio["passed"] = (
+        scroll_hitch_ratio["maximum"]
+        <= scroll_hitch_ratio["maximum_ceiling"]
+    )
+    scrolling_summaries = {
+        SCROLL_HITCH_DURATION_METRIC: scroll_hitch_duration,
+        SCROLL_HITCH_COUNT_METRIC: scroll_hitch_count,
+        SCROLL_HITCH_RATIO_METRIC: scroll_hitch_ratio,
     }
     application = launch_summaries.get(APPLICATION_METRIC)
     if application is None:
@@ -287,17 +359,22 @@ def main():
         "launch_metrics": launch_summaries,
         "local_navigation_metrics": local_navigation_summaries,
         "browser_command_metrics": browser_command_summaries,
+        "controlled_scrolling_metrics": scrolling_summaries,
         "address_field_focus_asserted_for_each_launch": True,
         "initial_webview_readiness_proxy": derived,
         "expected_launch_samples_per_metric": EXPECTED_LAUNCH_SAMPLE_COUNT,
         "expected_navigation_samples_per_metric": (
             EXPECTED_NAVIGATION_SAMPLE_COUNT
         ),
+        "expected_scroll_samples_per_metric": EXPECTED_SCROLL_SAMPLE_COUNT,
         "regression_comparison": regression_comparison,
         "passed": (
             application["passed"]
             and derived["passed"]
             and all(command["passed"] for command in command_summaries)
+            and scroll_hitch_duration["passed"]
+            and scroll_hitch_count["passed"]
+            and scroll_hitch_ratio["passed"]
             and regression_comparison["passed"]
         ),
     }
@@ -330,6 +407,28 @@ def main():
             f"p95 {summary['p95_ms']:.3f} ms, "
             f"max {summary['maximum_ms']:.3f} ms "
             f"({summary['samples']} samples)"
+        )
+    print(
+        f"{SCROLL_HITCH_DURATION_METRIC}: "
+        f"min {scroll_hitch_duration['minimum_ms']:.3f} ms, "
+        f"median {scroll_hitch_duration['median_ms']:.3f} ms, "
+        f"mean {scroll_hitch_duration['mean_ms']:.3f} ms, "
+        f"p95 {scroll_hitch_duration['p95_ms']:.3f} ms, "
+        f"max {scroll_hitch_duration['maximum_ms']:.3f} ms "
+        f"({scroll_hitch_duration['samples']} samples; "
+        f"ceiling {scroll_hitch_duration['maximum_ceiling_ms']:.0f} ms)"
+    )
+    for name in (SCROLL_HITCH_COUNT_METRIC, SCROLL_HITCH_RATIO_METRIC):
+        summary = scrolling_summaries[name]
+        print(
+            f"{name}: min {summary['minimum']:.3f} {summary['unit']}, "
+            f"median {summary['median']:.3f} {summary['unit']}, "
+            f"mean {summary['mean']:.3f} {summary['unit']}, "
+            f"p95 {summary['p95']:.3f} {summary['unit']}, "
+            f"max {summary['maximum']:.3f} {summary['unit']} "
+            f"({summary['samples']} samples; "
+            f"ceiling {summary['maximum_ceiling']:.3f} "
+            f"{summary['unit']})"
         )
     print(
         "Initial web-view readiness proxy: "

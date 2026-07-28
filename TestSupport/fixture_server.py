@@ -169,6 +169,32 @@ class FixtureHandler(BaseHTTPRequestHandler):
             self.send_json({"reload_count": 0})
         elif path == "/phase2/slow-response":
             self.send_slow_html()
+        elif path == "/performance/scroll":
+            rows = "".join(
+                f"<section><h2>Scroll row {index}</h2>"
+                "<p>Deterministic local scrolling content.</p></section>"
+                for index in range(1, 161)
+            )
+            self.send_html(
+                "<!doctype html><title>Scroll Performance</title>"
+                "<style>"
+                "body{font:16px system-ui;margin:0}"
+                "header{position:sticky;top:0;background:#fff;padding:16px}"
+                "section{height:120px;padding:16px;border-bottom:1px solid #ddd}"
+                "</style>"
+                "<header><h1>Controlled Scroll Fixture</h1>"
+                "<p id=scroll-state>Scroll position top</p></header>"
+                f"<main>{rows}</main>"
+                "<script>"
+                "const marker=document.getElementById('scroll-state');"
+                "let moved=false;"
+                "addEventListener('scroll',()=>{"
+                "const next=scrollY>10;"
+                "if(next!==moved){moved=next;marker.textContent=next?"
+                "'Scroll position moved':'Scroll position top'}"
+                "},{passive:true});"
+                "</script>"
+            )
         elif path.startswith("/privacy/navigation-gate/"):
             gate_path = path.removeprefix("/privacy/navigation-gate/")
             gate_components = gate_path.split("/")
@@ -224,6 +250,47 @@ class FixtureHandler(BaseHTTPRequestHandler):
             self.send_html(
                 "<!doctype html><title>cookie echo</title>"
                 f"<body>{cookie_header}</body>"
+            )
+        elif path == "/privacy/website-data":
+            self.send_html(
+                """<!doctype html>
+<title>Privacy Website Data</title>
+<body><main id="status">Website data preparing</main></body>
+<script>
+localStorage.setItem("phase4-local-storage", "present");
+const request = indexedDB.open("phase4-indexed-db", 1);
+const indexedDBReady = new Promise((resolve, reject) => {
+    request.onupgradeneeded = () => request.result.createObjectStore("values");
+    request.onsuccess = () => resolve(true);
+    request.onerror = () => reject(request.error);
+});
+const cacheReady = caches.open("phase4-fetch-cache").then((cache) =>
+    cache.add("/cache-resource")
+);
+const serviceWorkerReady = navigator.serviceWorker
+    ? navigator.serviceWorker.register("/service-worker.js").then(() => true)
+    : Promise.resolve(false);
+window.storageReady = Promise.all([
+    indexedDBReady,
+    cacheReady,
+    serviceWorkerReady,
+]).then(() => {
+    document.getElementById("status").textContent = "Website data ready";
+    return true;
+});
+</script>""",
+                extra_headers=[
+                    (
+                        "Set-Cookie",
+                        "phase4persistent=privacy-value-sentinel; Path=/; "
+                        "Max-Age=3600; SameSite=Lax; HttpOnly",
+                    ),
+                    (
+                        "Set-Cookie",
+                        "phase4session=session-value-sentinel; Path=/; "
+                        "SameSite=Strict",
+                    ),
+                ],
             )
         elif path == "/storage":
             self.send_html(

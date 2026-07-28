@@ -372,23 +372,249 @@ final class BrowserNavigationUITests: XCTestCase {
         XCTAssertEqual(requestCounts["/privacy/allowed.js"], 4)
         XCTAssertEqual(requestCounts["/privacy/blocked.js"], 2)
 
-        application.typeKey("p", modifierFlags: [.command, .option])
+        showPrivacy()
+        let resetExceptionsButton = application.buttons[
+            "BrowserPrivacyResetSiteExceptionsButton"
+        ]
+        waitUntilEnabled(resetExceptionsButton)
+        resetExceptionsButton.click()
+        let confirmResetButton = application.sheets.buttons[
+            "Reset Site Exceptions"
+        ]
+        XCTAssertTrue(confirmResetButton.waitForExistence(timeout: 2))
+        confirmResetButton.click()
+        application.buttons["BrowserPrivacyDoneButton"].click()
         XCTAssertTrue(
             pageText("Ad resource blocked").waitForExistence(timeout: 5),
-            "Re-enabling blocking did not reload with protection attached."
+            "Resetting all exceptions did not reload with protection attached."
         )
         requestCounts = try await fixtureRequestCounts()
         XCTAssertEqual(requestCounts["/privacy/allowed.js"], 5)
         XCTAssertEqual(
             requestCounts["/privacy/blocked.js"],
             2,
-            "Re-enabling blocking still requested the blocked resource."
+            "Resetting all exceptions still requested the blocked resource."
+        )
+
+        showPrivacy()
+        let deleteCompiledRulesButton = application.buttons[
+            "BrowserPrivacyDeleteCompiledRulesButton"
+        ]
+        waitUntilEnabled(deleteCompiledRulesButton)
+        deleteCompiledRulesButton.click()
+        let confirmCompiledDeleteButton = application.sheets.buttons[
+            "Delete Compiled Rules"
+        ]
+        XCTAssertTrue(confirmCompiledDeleteButton.waitForExistence(timeout: 2))
+        confirmCompiledDeleteButton.click()
+        waitForValue(
+            application.descendants(matching: .any)[
+                "BrowserPrivacyBlockingResetResult"
+            ],
+            containing: "Current pages remain protected"
+        )
+        application.buttons["BrowserPrivacyDoneButton"].click()
+
+        application.terminate()
+        launchApplication(resetContentBlocking: false)
+        navigate(to: "/privacy/blocking/")
+        XCTAssertTrue(
+            pageText("Ad resource blocked").waitForExistence(timeout: 5),
+            "Deleting compiled artifacts did not rebuild protection on relaunch."
+        )
+        requestCounts = try await fixtureRequestCounts()
+        XCTAssertEqual(requestCounts["/privacy/allowed.js"], 6)
+        XCTAssertEqual(
+            requestCounts["/privacy/blocked.js"],
+            2,
+            "The relaunched blocker requested the protected resource."
+        )
+    }
+
+    func testWebsiteDataPrivacyControlsMaskRevealDeleteAndPersistDeletion() {
+        launchApplication()
+        defer { application.terminate() }
+        navigate(to: "/privacy/website-data")
+        XCTAssertTrue(
+            pageText("Website data ready").waitForExistence(timeout: 5),
+            "The website-data fixture did not finish creating storage."
+        )
+
+        let inactiveOriginURL = "http://localhost:18765/phase2/page-a"
+        submit(inactiveOriginURL)
+        XCTAssertTrue(pageText("Phase 2 Page A").waitForExistence(timeout: 5))
+        waitForAddress(inactiveOriginURL)
+
+        showPrivacy()
+        XCTAssertTrue(
+            application.descendants(matching: .any)[
+                "BrowserPrivacyExplanation"
+            ].exists
+        )
+        XCTAssertTrue(
+            application.buttons["BrowserPrivacyDeleteAllCookiesButton"].exists
+        )
+        XCTAssertTrue(
+            application.buttons[
+                "BrowserPrivacyDeleteAllWebsiteDataButton"
+            ].exists
+        )
+
+        let persistentCookie = pageText("phase4persistent")
+        XCTAssertTrue(
+            persistentCookie.waitForExistence(timeout: 5),
+            "The persistent fixture cookie was not listed."
+        )
+        persistentCookie.click()
+        let cookieValue = application.descendants(matching: .any)[
+            "BrowserPrivacyCookieValue"
+        ]
+        waitForValue(cookieValue, equalTo: "••••••••")
+        XCTAssertNotEqual(cookieValue.value as? String, "privacy-value-sentinel")
+
+        let revealButton = application.buttons[
+            "BrowserPrivacyRevealCookieButton"
+        ]
+        revealButton.click()
+        waitForValue(cookieValue, equalTo: "privacy-value-sentinel")
+        revealButton.click()
+        waitForValue(cookieValue, equalTo: "••••••••")
+
+        application.buttons["BrowserPrivacyDeleteCookieButton"].click()
+        let confirmCookieDelete = application.sheets.buttons["Delete Cookie"]
+        XCTAssertTrue(confirmCookieDelete.waitForExistence(timeout: 2))
+        confirmCookieDelete.click()
+        XCTAssertTrue(
+            persistentCookie.waitForNonExistence(timeout: 5),
+            "Deleting one cookie left it in the privacy window."
+        )
+
+        let sessionCookie = pageText("phase4session")
+        XCTAssertTrue(sessionCookie.waitForExistence(timeout: 3))
+        sessionCookie.click()
+        application.buttons[
+            "BrowserPrivacyDeleteDomainCookiesButton"
+        ].click()
+        let confirmDomainCookieDelete = application.sheets.buttons[
+            "Delete Domain Cookies"
+        ]
+        XCTAssertTrue(confirmDomainCookieDelete.waitForExistence(timeout: 2))
+        confirmDomainCookieDelete.click()
+        XCTAssertTrue(
+            sessionCookie.waitForNonExistence(timeout: 5),
+            "Deleting the exact domain's cookies left a cookie behind."
+        )
+
+        let websiteDataSegment = application.radioButtons["Website Data"]
+        XCTAssertTrue(websiteDataSegment.waitForExistence(timeout: 2))
+        websiteDataSegment.click()
+        let websiteDataRecord = pageText("127.0.0.1")
+        XCTAssertTrue(
+            websiteDataRecord.waitForExistence(timeout: 5),
+            "Cookie-only deletion also removed broader website data."
+        )
+        websiteDataRecord.click()
+        waitForValue(
+            application.descendants(matching: .any)[
+                "BrowserPrivacySelectionDetail"
+            ],
+            containing: "Local Storage"
+        )
+        application.buttons["BrowserPrivacyDeleteSiteDataButton"].click()
+        let confirmSiteDataDelete = application.sheets.buttons[
+            "Delete Website Data"
+        ]
+        XCTAssertTrue(confirmSiteDataDelete.waitForExistence(timeout: 2))
+        confirmSiteDataDelete.click()
+        XCTAssertTrue(
+            websiteDataRecord.waitForNonExistence(timeout: 5),
+            "Deleting the selected WebKit record left it visible."
+        )
+
+        application.buttons["BrowserPrivacyDoneButton"].click()
+        let secondOriginURL = "http://localhost:18765/privacy/website-data"
+        submit(secondOriginURL)
+        XCTAssertTrue(
+            pageText("Website data ready").waitForExistence(timeout: 5),
+            "The second website-data origin did not finish creating storage."
+        )
+        waitForAddress(secondOriginURL)
+        let inactivePageURL = fixtureURL("/phase2/page-a")
+        submit(inactivePageURL)
+        XCTAssertTrue(pageText("Phase 2 Page A").waitForExistence(timeout: 5))
+        waitForAddress(inactivePageURL)
+        showPrivacy()
+
+        application.radioButtons["Cookies"].click()
+        let remainingPersistentCookie = pageText("phase4persistent")
+        let remainingSessionCookie = pageText("phase4session")
+        XCTAssertTrue(
+            remainingPersistentCookie.waitForExistence(timeout: 5),
+            "The second origin's cookies were not available for global deletion."
+        )
+        application.buttons["BrowserPrivacyDeleteAllCookiesButton"].click()
+        let confirmAllCookieDelete = application.sheets.buttons[
+            "Delete All Cookies"
+        ]
+        XCTAssertTrue(confirmAllCookieDelete.waitForExistence(timeout: 2))
+        confirmAllCookieDelete.click()
+        XCTAssertTrue(
+            remainingPersistentCookie.waitForNonExistence(timeout: 5)
+                && remainingSessionCookie.waitForNonExistence(timeout: 5),
+            "Deleting all cookies left a cookie visible."
+        )
+
+        application.radioButtons["Website Data"].click()
+        let remainingWebsiteDataRecord = pageText("localhost")
+        XCTAssertTrue(
+            remainingWebsiteDataRecord.waitForExistence(timeout: 5),
+            "Global cookie deletion also removed broader website data."
+        )
+        application.buttons[
+            "BrowserPrivacyDeleteAllWebsiteDataButton"
+        ].click()
+        let confirmAllWebsiteDataDelete = application.sheets.buttons[
+            "Delete All Website Data"
+        ]
+        XCTAssertTrue(confirmAllWebsiteDataDelete.waitForExistence(timeout: 2))
+        confirmAllWebsiteDataDelete.click()
+        XCTAssertTrue(
+            remainingWebsiteDataRecord.waitForNonExistence(timeout: 5),
+            "Deleting all website data left a WebKit record visible."
+        )
+        application.buttons["BrowserPrivacyDoneButton"].click()
+
+        application.terminate()
+        launchApplication(
+            resetContentBlocking: false,
+            resetWebsiteData: false
+        )
+        XCTAssertTrue(
+            application.descendants(matching: .any)["BrowserWebView"]
+                .waitForExistence(timeout: 5)
+        )
+        showPrivacy()
+        let privacyStatus = application.descendants(matching: .any)[
+            "BrowserPrivacyStatus"
+        ]
+        waitForValue(privacyStatus, containing: "0 cookies across")
+        XCTAssertTrue(
+            pageText("phase4persistent").waitForNonExistence(timeout: 1)
+                && pageText("phase4session").waitForNonExistence(timeout: 1),
+            "Deleted cookies returned after relaunch."
+        )
+        application.radioButtons["Website Data"].click()
+        XCTAssertTrue(
+            pageText("127.0.0.1").waitForNonExistence(timeout: 1)
+                && pageText("localhost").waitForNonExistence(timeout: 1),
+            "Deleted website data returned after relaunch."
         )
     }
 
     private func launchApplication(
         ignoringSavedState: Bool = true,
-        resetContentBlocking: Bool = true
+        resetContentBlocking: Bool = true,
+        resetWebsiteData: Bool = true
     ) {
         continueAfterFailure = false
         application = XCUIApplication()
@@ -399,6 +625,11 @@ final class BrowserNavigationUITests: XCTestCase {
         if resetContentBlocking {
             application.launchArguments.append(
                 "--reset-ui-test-content-blocking"
+            )
+        }
+        if resetWebsiteData {
+            application.launchArguments.append(
+                "--reset-ui-test-website-data"
             )
         }
         if ignoringSavedState {
@@ -561,6 +792,23 @@ final class BrowserNavigationUITests: XCTestCase {
         )
     }
 
+    private func showPrivacy() {
+        application.activate()
+        let privacyMenu = application.menuBars.menuBarItems["Privacy"]
+        XCTAssertTrue(privacyMenu.waitForExistence(timeout: 3))
+        privacyMenu.click()
+        let manageWebsiteData = application.menuItems[
+            "Manage Website Data…"
+        ]
+        waitUntilEnabled(manageWebsiteData)
+        manageWebsiteData.click()
+        XCTAssertTrue(
+            application.windows["BrowserPrivacyWindow"]
+                .waitForExistence(timeout: 3),
+            "The Privacy window did not appear."
+        )
+    }
+
     private func replaceText(in field: XCUIElement, with text: String) {
         XCTAssertTrue(field.waitForExistence(timeout: 3))
         field.click()
@@ -585,6 +833,47 @@ final class BrowserNavigationUITests: XCTestCase {
             XCTWaiter.wait(for: [expectation], timeout: 5),
             .completed,
             "Displayed URL did not become \(expected).",
+            file: file,
+            line: line
+        )
+    }
+
+    private func waitForValue(
+        _ element: XCUIElement,
+        equalTo expectedValue: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", expectedValue),
+            object: element
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectation], timeout: 5),
+            .completed,
+            "Element value did not become \(expectedValue).",
+            file: file,
+            line: line
+        )
+    }
+
+    private func waitForValue(
+        _ element: XCUIElement,
+        containing expectedText: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(
+                format: "value CONTAINS[c] %@",
+                expectedText
+            ),
+            object: element
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectation], timeout: 5),
+            .completed,
+            "Element value did not contain \(expectedText).",
             file: file,
             line: line
         )
