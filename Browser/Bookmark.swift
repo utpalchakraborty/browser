@@ -4,6 +4,8 @@ nonisolated enum BookmarkURLValidationError: Error, Equatable, Sendable {
     case unsupportedScheme(String?)
     case missingHost
     case credentialsNotAllowed
+    case invalidLocalFileURL
+    case unsupportedLocalFileType
     case malformedURL
 }
 
@@ -12,13 +14,17 @@ extension BookmarkURLValidationError: LocalizedError {
         switch self {
         case let .unsupportedScheme(scheme):
             if let scheme {
-                return "Bookmarks support only HTTP and HTTPS URLs, not \(scheme)."
+                return "Bookmarks support HTTP, HTTPS, and local HTML files, not \(scheme)."
             }
-            return "Bookmarks require an HTTP or HTTPS URL."
+            return "Bookmarks require an HTTP, HTTPS, or local HTML URL."
         case .missingHost:
             return "A bookmark URL must include a host."
         case .credentialsNotAllowed:
             return "Bookmark URLs cannot contain a username or password."
+        case .invalidLocalFileURL:
+            return "A local bookmark must use an absolute path on this Mac."
+        case .unsupportedLocalFileType:
+            return "Local bookmarks support only .html and .htm files."
         case .malformedURL:
             return "That bookmark URL is not valid."
         }
@@ -35,6 +41,22 @@ nonisolated enum BookmarkURLCanonicalizer {
         }
 
         let scheme = components.scheme?.lowercased()
+        if scheme == "file" {
+            guard LocalFileAccessPolicy.isLocalFileURL(url) else {
+                throw BookmarkURLValidationError.invalidLocalFileURL
+            }
+            guard LocalFileAccessPolicy.isSupportedHTMLFile(url) else {
+                throw BookmarkURLValidationError.unsupportedLocalFileType
+            }
+            guard
+                let canonicalURL = LocalFileAccessPolicy
+                    .standardizedNavigationURL(url),
+                LocalFileAccessPolicy.isSupportedHTMLFile(canonicalURL)
+            else {
+                throw BookmarkURLValidationError.invalidLocalFileURL
+            }
+            return canonicalURL
+        }
         guard let scheme, ["http", "https"].contains(scheme) else {
             throw BookmarkURLValidationError.unsupportedScheme(components.scheme)
         }
@@ -96,6 +118,62 @@ nonisolated struct Bookmark: Codable, Equatable, Identifiable, Sendable {
         try canonicalURL(for: url).absoluteString
     }
 
+    static func canonicalURL(fromAddress address: String) throws -> URL {
+        let trimmedAddress = address.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard !trimmedAddress.isEmpty else {
+            throw BookmarkURLValidationError.malformedURL
+        }
+
+        let url: URL?
+        if trimmedAddress.hasPrefix("/")
+            && !trimmedAddress.hasPrefix("//")
+        {
+            url = URL(fileURLWithPath: trimmedAddress)
+        } else {
+            url = URL(string: trimmedAddress)
+        }
+        guard let url else {
+            throw BookmarkURLValidationError.malformedURL
+        }
+        return try canonicalURL(for: url)
+    }
+
+    static func defaultTitle(for url: URL) -> String {
+        if url.isFileURL, !url.lastPathComponent.isEmpty {
+            return url.lastPathComponent
+        }
+        return url.host ?? url.absoluteString
+    }
+
+    static func refersToSamePage(_ firstURL: URL, _ secondURL: URL) -> Bool {
+        guard firstURL.isFileURL || secondURL.isFileURL else {
+            return firstURL == secondURL
+        }
+        guard
+            firstURL.isFileURL,
+            secondURL.isFileURL,
+            LocalFileAccessPolicy.refersToSameFile(firstURL, secondURL),
+            let firstComponents = URLComponents(
+                url: firstURL,
+                resolvingAgainstBaseURL: false
+            ),
+            let secondComponents = URLComponents(
+                url: secondURL,
+                resolvingAgainstBaseURL: false
+            )
+        else {
+            return false
+        }
+        return normalizedComponent(firstComponents.percentEncodedQuery)
+            == normalizedComponent(secondComponents.percentEncodedQuery)
+            && normalizedComponent(firstComponents.percentEncodedFragment)
+                == normalizedComponent(
+                    secondComponents.percentEncodedFragment
+                )
+    }
+
     init(
         id: UUID = UUID(),
         url: URL,
@@ -155,7 +233,11 @@ nonisolated struct Bookmark: Codable, Equatable, Identifiable, Sendable {
         if !trimmed.isEmpty {
             return trimmed
         }
-        return url.host ?? url.absoluteString
+        return defaultTitle(for: url)
+    }
+
+    private static func normalizedComponent(_ component: String?) -> String? {
+        component?.isEmpty == true ? nil : component
     }
 }
 

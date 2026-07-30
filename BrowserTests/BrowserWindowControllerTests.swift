@@ -72,6 +72,88 @@ final class BrowserWindowControllerTests: XCTestCase {
         XCTAssertEqual(chromeView.addressField.stringValue, "x")
     }
 
+    func testLocalHTMLApprovalIsReusedForBookmarkOnlyInSameTab() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: rootURL,
+            withIntermediateDirectories: false
+        )
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let fileURL = rootURL.appendingPathComponent("index.html")
+        try Data(
+            "<html><head><title>Approved Local Page</title></head><body>Local</body></html>".utf8
+        ).write(to: fileURL)
+
+        let authorizer = TestLocalFileAccessAuthorizer()
+        let controller = BrowserWindowController(
+            localFileAccessAuthorizer: authorizer
+        )
+        let window = try XCTUnwrap(controller.window)
+        let chromeView = try XCTUnwrap(
+            window.contentView as? BrowserChromeView
+        )
+        window.orderFront(nil)
+        defer { window.close() }
+        controller.startWebView(
+            profile: BrowserProfile(dataStoreIdentifier: UUID())
+        )
+
+        chromeView.addressField.stringValue = fileURL.path
+        controller.submitAddress(nil)
+
+        XCTAssertTrue(
+            LocalFileAccessPolicy.refersToSameFile(
+                authorizer.requestedFileURL,
+                fileURL
+            )
+        )
+        XCTAssertEqual(authorizer.requestCount, 1)
+        authorizer.resolve(with: rootURL)
+
+        let loaded = await waitUntil {
+            LocalFileAccessPolicy.refersToSameFile(
+                controller.webView?.url,
+                fileURL
+            )
+                && controller.webView?.isLoading == false
+        }
+        XCTAssertTrue(loaded)
+        XCTAssertEqual(controller.webView?.title, "Approved Local Page")
+
+        let remoteURL = Phase1Fixture.url(
+            "/phase2/page-a?local-bookmark-grant=remote"
+        ).absoluteURL
+        controller.openBookmark(remoteURL)
+        let remoteLoaded = await waitUntil {
+            controller.webView?.url == remoteURL
+                && controller.webView?.isLoading == false
+        }
+        XCTAssertTrue(remoteLoaded)
+
+        controller.openBookmark(fileURL)
+        let bookmarkReloaded = await waitUntil {
+            LocalFileAccessPolicy.refersToSameFile(
+                controller.webView?.url,
+                fileURL
+            )
+                && controller.webView?.isLoading == false
+        }
+        XCTAssertTrue(bookmarkReloaded)
+        XCTAssertEqual(authorizer.requestCount, 1)
+
+        controller.newTab(nil)
+        controller.openBookmark(fileURL)
+
+        XCTAssertEqual(authorizer.requestCount, 2)
+        XCTAssertTrue(
+            LocalFileAccessPolicy.refersToSameFile(
+                authorizer.requestedFileURL,
+                fileURL
+            )
+        )
+    }
+
     func testNewAndCloseTabUseFreshBlankLastTabBehavior() throws {
         let controller = BrowserWindowController()
         let window = try XCTUnwrap(controller.window)
@@ -977,5 +1059,34 @@ private struct ContentBlockingControllerFixture {
         defaults.removePersistentDomain(forName: defaultsSuiteName)
         try? FileManager.default.removeItem(at: ruleStoreDirectory)
         coordinator.forget(webView.configuration.userContentController)
+    }
+}
+
+@MainActor
+private final class TestLocalFileAccessAuthorizer:
+    LocalFileAccessAuthorizing
+{
+    private(set) var requestedFileURL: URL?
+    private(set) var requestCount = 0
+    private var completion: (@MainActor (URL?) -> Void)?
+
+    func requestAccess(
+        toContainingDirectoryOf fileURL: URL,
+        from window: NSWindow,
+        completion: @escaping @MainActor (URL?) -> Void
+    ) {
+        requestCount += 1
+        requestedFileURL = fileURL
+        self.completion = completion
+    }
+
+    func cancel() {
+        completion = nil
+    }
+
+    func resolve(with directoryURL: URL?) {
+        let completion = completion
+        self.completion = nil
+        completion?(directoryURL)
     }
 }

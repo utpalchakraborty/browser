@@ -21,7 +21,12 @@ nonisolated enum ContentBlockingNavigationURL {
             let targetURL,
             let sourceScheme = sourceURL.scheme?.lowercased(),
             let targetScheme = targetURL.scheme?.lowercased(),
-            [sourceScheme, targetScheme].allSatisfy({ $0 == "http" || $0 == "https" }),
+            (
+                [sourceScheme, targetScheme].allSatisfy({
+                    $0 == "http" || $0 == "https"
+                })
+                    || (sourceScheme == "file" && targetScheme == "file")
+            ),
             var sourceComponents = URLComponents(
                 url: sourceURL,
                 resolvingAgainstBaseURL: false

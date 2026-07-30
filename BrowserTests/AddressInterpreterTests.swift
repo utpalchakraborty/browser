@@ -30,6 +30,74 @@ final class AddressInterpreterTests: XCTestCase {
         )
     }
 
+    func testAcceptsAbsoluteAndFileURLLocalHTMLAddresses() throws {
+        let interpreter = AddressInterpreter()
+
+        XCTAssertEqual(
+            interpreter.interpret(
+                "/Users/example/Local Site/index page.html"
+            ),
+            .localFile(
+                URL(
+                    fileURLWithPath:
+                        "/Users/example/Local Site/index page.html"
+                ).standardizedFileURL
+            )
+        )
+        XCTAssertEqual(
+            interpreter.interpret(
+                "file:///Users/example/Local%20Site/INDEX.HTM"
+            ),
+            .localFile(
+                URL(
+                    fileURLWithPath:
+                        "/Users/example/Local Site/INDEX.HTM"
+                ).standardizedFileURL
+            )
+        )
+        XCTAssertEqual(
+            interpreter.interpret(
+                "file:///Users/example/Local%20Site/index.html?mode=cards#details"
+            ),
+            .localFile(
+                try XCTUnwrap(
+                    URL(
+                        string:
+                            "file:///Users/example/Local%20Site/index.html?mode=cards#details"
+                    )
+                )
+            )
+        )
+    }
+
+    func testRejectsRemoteMalformedAndUnsupportedLocalFiles() {
+        let interpreter = AddressInterpreter()
+
+        for input in [
+            "file://server.example/index.html",
+            "file://user@localhost/index.html",
+            "file://localhost:80/index.html",
+            "file:index.html",
+            "file:",
+        ] {
+            XCTAssertEqual(
+                interpreter.interpret(input),
+                .failure(.invalidLocalFile),
+                input
+            )
+        }
+        for input in [
+            "/Users/example/page.txt",
+            "file:///Users/example/archive.pdf",
+        ] {
+            XCTAssertEqual(
+                interpreter.interpret(input),
+                .failure(.unsupportedLocalFileType),
+                input
+            )
+        }
+    }
+
     func testInfersHTTPSForPlausibleHosts() {
         let interpreter = AddressInterpreter()
 
@@ -95,7 +163,7 @@ final class AddressInterpreterTests: XCTestCase {
         XCTAssertEqual(interpreter.interpret(" \n\t "), .failure(.emptyInput))
         XCTAssertEqual(
             AddressInterpretationError.emptyInput.errorDescription,
-            "Enter a web address or search term."
+            "Enter a web address, local HTML path, or search term."
         )
     }
 
@@ -142,7 +210,6 @@ final class AddressInterpreterTests: XCTestCase {
     func testUnsupportedSchemesAreRejectedExplicitly() {
         let interpreter = AddressInterpreter()
         let cases = [
-            ("file:///tmp/private", "file"),
             ("javascript:alert(1)", "javascript"),
             ("mailto:user@example.com", "mailto"),
             ("custom-scheme://host/path", "custom-scheme"),

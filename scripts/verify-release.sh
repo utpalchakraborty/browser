@@ -53,6 +53,15 @@ case "$entitlements" in
         exit 1
         ;;
 esac
+case "$entitlements" in
+    *"<key>com.apple.security.files.user-selected.read-only</key><true/>"*)
+        ;;
+    *)
+        echo "Release signature is missing the user-selected read-only file entitlement." >&2
+        echo "$entitlements" >&2
+        exit 1
+        ;;
+esac
 
 case "$entitlements" in
     *"com.apple.security.get-task-allow"*)
@@ -65,8 +74,8 @@ entitlement_count=$(
     printf '%s' "$entitlements" |
         awk -F'<key>' '{ count += NF - 1 } END { print count + 0 }'
 )
-if [ "$entitlement_count" -ne 2 ]; then
-    echo "Release signature contains entitlements beyond App Sandbox and outgoing network." >&2
+if [ "$entitlement_count" -ne 3 ]; then
+    echo "Release signature contains entitlements beyond App Sandbox, outgoing network, and user-selected read-only files." >&2
     echo "$entitlements" >&2
     exit 1
 fi

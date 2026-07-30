@@ -2,7 +2,7 @@
 
 Status: Approved; Phase 4 and the minimal Phase 5 tab implementation are
 complete, with automated gates and normal-session user acceptance green
-Last updated: 2026-07-28
+Last updated: 2026-07-30
 
 ## 1. Purpose
 
@@ -158,6 +158,8 @@ BrowserWindowController owns one browser window, including:
 - keyboard focus and command routing to the selected tab;
 - configuration of native frame autosave for the main window;
 - bookmark-button state and presentation of the bookmark editor and manager;
+- presentation of the user-selected folder consent flow for submitted local
+  HTML paths;
 - Privacy-menu status and coordination of a user-requested current-site
   exception and explicit selected-tab reload so document-level matches remain
   recoverable;
@@ -213,7 +215,7 @@ TabController is main-actor isolated and owns:
 - observations for URL, title, progress, loading, and back/forward capability;
 - transient navigation URLs and load errors;
 - an independent ContentBlockingNavigationState for navigation-race handling;
-  and
+- memory-only read grants for explicitly approved local-page folders; and
 - lifecycle teardown for observations, delegates, loads, blocker attachment
   bookkeeping, callbacks, and browsing state when the tab closes.
 
@@ -279,8 +281,8 @@ Phase 2 default is DuckDuckGo without live suggestions.
 ### Bookmarks
 
 BookmarkRepository is a Swift actor that owns `Bookmarks.json`, a versioned
-file containing stable identifiers, canonical HTTP/HTTPS URLs, titles, and
-creation/update timestamps.
+file containing stable identifiers, canonical HTTP/HTTPS URLs or absolute local
+`.html`/`.htm` file URLs, titles, and creation/update timestamps.
 
 - Reads and writes do not run on the main actor.
 - Writes use atomic replacement.
@@ -295,6 +297,9 @@ creation/update timestamps.
 - The toolbar star and Command-D add or edit the selected tab's current page;
   Option-Command-B opens the manager. Opening a bookmark replaces the selected
   tab's current page.
+- A local bookmark persists only its explicit file URL. Opening it reuses a
+  matching in-memory grant in the selected tab or presents the same exact-folder
+  consent panel used by address submission. The grant is never persisted.
 
 Phase 3 deliberately has no persistent bookmarks bar and no folder hierarchy.
 The searchable manager and keyboard commands keep the browsing surface compact;
@@ -468,14 +473,20 @@ can provide a stronger no-persistence mode.
   values, page content, form values, or bookmark contents.
 - Performance signposts use opaque tab identifiers, never URLs.
 - App Sandbox and hardened runtime are enabled.
-- Initial entitlements are limited to outgoing network access. User-selected
-  file write access is added only when downloads are implemented.
+- Entitlements are limited to outgoing network access and user-selected,
+  read-only file access. The latter is exercised only through a visible folder
+  panel for submitted or bookmarked local HTML; user-selected write access is
+  added only if downloads are implemented.
 - Camera, microphone, location, notification, and similar privileges are absent
   until a visible permission policy is implemented and approved.
 - WebKit performs TLS validation. The application never bypasses certificate
   errors or opts into deprecated TLS.
-- HTTP and HTTPS are accepted. Other URL schemes are denied or explicitly
-  handed to macOS under a small, tested allowlist and visible user action.
+- HTTP and HTTPS are accepted. A submitted or explicitly bookmarked local
+  `.html` or `.htm` path may use `file:` only after the user approves its exact
+  containing folder; remote pages cannot request that approval or navigate to
+  files outside the active grant. Persisting a bookmark path does not persist or
+  imply authorization. Other URL schemes are denied or explicitly handed to
+  macOS under a small, tested allowlist and visible user action.
 - A page may not autonomously create a secondary app window, WKWebView,
   background tab, or tab-under. Scripted `window.open` requests, forms targeting
   a new browsing context, and requests triggered by page script in response to
@@ -560,10 +571,18 @@ the budget is deliberately revised with recorded evidence.
 A typical navigation flow is:
 
 1. BrowserWindowController sends submitted text to AddressInterpreter.
-2. The result is either a valid URL or a visible validation error.
-3. The selected TabController asks its WKWebView to load.
-4. Delegate and observed WebKit state update the tab snapshot.
-5. The window renders title, progress, and navigation capability from that
+2. The result is either a web URL, a local HTML URL, or a visible validation
+   error.
+3. A local HTML result presents a directory-only open panel. The selected
+   directory must be the file's exact containing folder after symlink
+   resolution; cancellation performs no navigation.
+4. The selected TabController either asks its WKWebView to load the web request
+   or uses `loadFileURL(_:allowingReadAccessTo:)` with the approved folder.
+5. The tab retains each explicit read grant only in memory so local assets,
+   in-folder navigation, reload, and back/forward continue to work, then
+   releases every grant when the tab closes.
+6. Delegate and observed WebKit state update the tab snapshot.
+7. The window renders title, progress, and navigation capability from that
    snapshot.
 
 Navigation completion is never treated as a signal to persist a visit.
@@ -778,7 +797,9 @@ The measured WebKit API and platform risk decision is recorded in
 - [WKHTTPCookieStore](https://developer.apple.com/documentation/webkit/wkhttpcookiestore)
 - [WKContentRuleList](https://developer.apple.com/documentation/webkit/wkcontentrulelist)
 - [WKNavigationDelegate](https://developer.apple.com/documentation/webkit/wknavigationdelegate)
+- [WKWebView local-file loading](https://developer.apple.com/documentation/webkit/wkwebview/loadfileurl(_:allowingreadaccessto:))
 - [Apple App Sandbox](https://developer.apple.com/documentation/security/protecting-user-data-with-app-sandbox)
+- [App Sandbox file access](https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox)
 - [Apple performance and metrics](https://developer.apple.com/documentation/xcode/performance-and-metrics)
 - [Microsoft WebView2](https://learn.microsoft.com/en-us/microsoft-edge/webview2/)
 - [WebKitGTK WebView](https://webkitgtk.org/reference/webkit2gtk/stable/class.WebView.html)

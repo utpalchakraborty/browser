@@ -96,7 +96,7 @@ final class BookmarkEditorSheetController: NSWindowController {
         titleField.placeholderString = "Name"
         titleField.setAccessibilityIdentifier("BrowserBookmarkTitleField")
         titleField.setAccessibilityLabel("Bookmark name")
-        urlField.placeholderString = "https://example.com/"
+        urlField.placeholderString = "https://example.com/ or /path/page.html"
         urlField.lineBreakMode = .byTruncatingMiddle
         urlField.setAccessibilityIdentifier("BrowserBookmarkURLField")
         urlField.setAccessibilityLabel("Bookmark address")
@@ -221,7 +221,9 @@ final class BookmarkEditorSheetController: NSWindowController {
             return
         }
         guard let url = Self.validBookmarkURL(from: address) else {
-            showValidationError("Enter a credential-free HTTP or HTTPS address with a host.")
+            showValidationError(
+                "Enter an HTTP/HTTPS address or an absolute path to a local .html or .htm file."
+            )
             window?.makeFirstResponder(urlField)
             return
         }
@@ -286,17 +288,6 @@ final class BookmarkEditorSheetController: NSWindowController {
     }
 
     private static func validBookmarkURL(from string: String) -> URL? {
-        guard
-            let components = URLComponents(string: string),
-            let scheme = components.scheme?.lowercased(),
-            ["http", "https"].contains(scheme),
-            components.host?.isEmpty == false,
-            components.user == nil,
-            components.password == nil,
-            let url = components.url
-        else {
-            return nil
-        }
-        return url
+        try? Bookmark.canonicalURL(fromAddress: string)
     }
 }

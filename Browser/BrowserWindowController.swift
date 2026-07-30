@@ -33,6 +33,7 @@ final class BrowserWindowController: NSWindowController,
     private let chromeView: BrowserChromeView
     private let contentBlockingCoordinator: ContentBlockingCoordinator?
     private let externalURLOpener: (URL) -> Bool
+    private let localFileAccessAuthorizer: any LocalFileAccessAuthorizing
     private var addressInterpreter: AddressInterpreter
     private var searchProvider: SearchProvider
     private var bookmarkCoordinator: BookmarkCoordinator?
@@ -43,6 +44,7 @@ final class BrowserWindowController: NSWindowController,
         WebsiteDataPrivacyWindowController?
     private var compiledBlockerResetTask: Task<Void, Never>?
     private var compiledBlockerArtifactsWereReset = false
+    private var localFileAccessRequestID: UUID?
 
     private var isEditingAddress = false
     private var renderedTabPresentations: [BrowserTabPresentation] = []
@@ -53,11 +55,14 @@ final class BrowserWindowController: NSWindowController,
         contentBlockingCoordinator: ContentBlockingCoordinator? = nil,
         externalURLOpener: @escaping (URL) -> Bool = {
             NSWorkspace.shared.open($0)
-        }
+        },
+        localFileAccessAuthorizer: (any LocalFileAccessAuthorizing)? = nil
     ) {
         self.searchProvider = searchProvider
         self.contentBlockingCoordinator = contentBlockingCoordinator
         self.externalURLOpener = externalURLOpener
+        self.localFileAccessAuthorizer = localFileAccessAuthorizer
+            ?? OpenPanelLocalFileAccessAuthorizer()
         let initialTab = TabController(
             contentBlockingCoordinator: contentBlockingCoordinator
         )
@@ -252,7 +257,11 @@ final class BrowserWindowController: NSWindowController,
             NSSound.beep()
             return
         }
-        navigate(to: canonicalURL)
+        if canonicalURL.isFileURL {
+            openLocalFile(canonicalURL)
+        } else {
+            navigate(to: canonicalURL)
+        }
     }
 
     @objc
@@ -481,6 +490,8 @@ final class BrowserWindowController: NSWindowController,
         ) {
         case let .navigate(url):
             navigate(to: url)
+        case let .localFile(url):
+            openLocalFile(url)
         case let .failure(error):
             presentAddressError(error)
             focusAddressField()
@@ -741,6 +752,8 @@ final class BrowserWindowController: NSWindowController,
     }
 
     func windowWillClose(_ notification: Notification) {
+        localFileAccessRequestID = nil
+        localFileAccessAuthorizer.cancel()
         bookmarkCoordinator?.cancel()
         bookmarkManagerWindowController?.close()
         websiteDataPrivacyWindowController?.close()
@@ -772,6 +785,108 @@ final class BrowserWindowController: NSWindowController,
         renderDisplayedURL()
         if let webView = tab.webView {
             window?.makeFirstResponder(webView)
+        }
+    }
+
+    private func openLocalFile(_ fileURL: URL) {
+        if profile == nil,
+           contentBlockingCoordinator?.availability == .unavailable
+        {
+            presentContentBlockingUnavailable()
+            return
+        }
+
+        let tab = tabManager.selectedTab
+        guard tab.hasLocalFileAccess(to: fileURL) else {
+            requestLocalFileAccess(to: fileURL)
+            return
+        }
+
+        isEditingAddress = false
+        guard tab.navigateToPreviouslyAuthorizedLocalFile(fileURL) else {
+            if !tab.hasVisibleError {
+                presentError(
+                    title: "Local Page Not Opened",
+                    message: "Browser couldn’t load that approved local HTML file.",
+                    recoveryActionTitle: nil
+                )
+            }
+            return
+        }
+        renderDisplayedURL()
+        if let webView = tab.webView {
+            window?.makeFirstResponder(webView)
+        }
+    }
+
+    private func requestLocalFileAccess(to fileURL: URL) {
+        guard let window else {
+            return
+        }
+        if profile == nil,
+           contentBlockingCoordinator?.availability == .unavailable
+        {
+            presentContentBlockingUnavailable()
+            return
+        }
+
+        let requestID = UUID()
+        let initiatingTabID = tabManager.selectedTabID
+        localFileAccessRequestID = requestID
+        localFileAccessAuthorizer.requestAccess(
+            toContainingDirectoryOf: fileURL,
+            from: window
+        ) { [weak self] selectedDirectoryURL in
+            guard let self else {
+                selectedDirectoryURL?.stopAccessingSecurityScopedResource()
+                return
+            }
+            guard self.localFileAccessRequestID == requestID else {
+                selectedDirectoryURL?.stopAccessingSecurityScopedResource()
+                return
+            }
+            self.localFileAccessRequestID = nil
+            guard let selectedDirectoryURL else {
+                return
+            }
+            guard
+                self.tabManager.selectedTabID == initiatingTabID,
+                let tab = self.tabManager.tab(id: initiatingTabID)
+            else {
+                selectedDirectoryURL.stopAccessingSecurityScopedResource()
+                return
+            }
+            guard
+                let authorization = LocalFileAccessPolicy.authorization(
+                    for: fileURL,
+                    selectedDirectoryURL: selectedDirectoryURL
+                )
+            else {
+                selectedDirectoryURL.stopAccessingSecurityScopedResource()
+                self.presentError(
+                    title: "Local Page Not Opened",
+                    message: "Choose the HTML file’s exact containing folder and make sure the file still exists.",
+                    recoveryActionTitle: nil
+                )
+                self.focusAddressField()
+                return
+            }
+
+            self.isEditingAddress = false
+            guard tab.navigate(toLocalFile: authorization) else {
+                if !tab.hasVisibleError {
+                    self.presentError(
+                        title: "Local Page Not Opened",
+                        message: "Browser couldn’t load that approved local HTML file.",
+                        recoveryActionTitle: nil
+                    )
+                }
+                return
+            }
+            self.renderDisplayedURL()
+            if let webView = tab.webView {
+                self.window?.makeFirstResponder(webView)
+            }
         }
     }
 
@@ -936,7 +1051,7 @@ final class BrowserWindowController: NSWindowController,
             return nil
         }
         return bookmarkCoordinator?.bookmarks.first {
-            $0.url == candidate.url
+            Bookmark.refersToSamePage($0.url, candidate.url)
         }
     }
 
@@ -1309,10 +1424,16 @@ final class BrowserWindowController: NSWindowController,
                 message: error.localizedDescription,
                 recoveryActionTitle: nil
             )
+        case .invalidLocalFile, .unsupportedLocalFileType:
+            presentError(
+                title: "Invalid Local File",
+                message: error.localizedDescription,
+                recoveryActionTitle: nil
+            )
         case let .unsupportedScheme(scheme):
             presentError(
                 title: "Unsupported Address",
-                message: "Browser can’t open the \(scheme) scheme. Use an HTTP or HTTPS address.",
+                message: "Browser can’t open the \(scheme) scheme. Use an HTTP or HTTPS address or an approved local HTML file.",
                 recoveryActionTitle: nil
             )
         }

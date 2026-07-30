@@ -42,6 +42,8 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
     private var observations: [NSKeyValueObservation] = []
     private var contentBlockingNavigationState =
         ContentBlockingNavigationState<WKNavigation>()
+    private var localFileAuthorizations: [LocalFileAuthorization] = []
+    private var approvedLocalFileURL: URL?
 
     private var firstBlankNavigation: WKNavigation?
     private var firstBlankNavigationState: OSSignpostIntervalState?
@@ -122,6 +124,82 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
         load(URLRequest(url: url), purpose: .submitted)
     }
 
+    @discardableResult
+    func navigate(toLocalFile authorization: LocalFileAuthorization) -> Bool {
+        guard
+            !isClosed,
+            LocalFileAccessPolicy.isSupportedHTMLFile(authorization.fileURL),
+            LocalFileAccessPolicy.contains(
+                authorization.fileURL,
+                in: authorization.readAccessURL
+            )
+        else {
+            authorization.securityScopedURL
+                .stopAccessingSecurityScopedResource()
+            return false
+        }
+
+        let alreadyAuthorized = localFileAuthorizations.contains {
+            LocalFileAccessPolicy.refersToSameFile(
+                $0.readAccessURL,
+                authorization.readAccessURL
+            )
+        }
+        if alreadyAuthorized {
+            authorization.securityScopedURL
+                .stopAccessingSecurityScopedResource()
+        } else {
+            localFileAuthorizations.append(authorization)
+        }
+        approvedLocalFileURL = authorization.fileURL
+        let didStart = load(
+            URLRequest(url: authorization.fileURL),
+            purpose: .submitted
+        )
+        if !didStart {
+            approvedLocalFileURL = nil
+            if !alreadyAuthorized {
+                removeLocalFileAuthorization(
+                    readAccessURL: authorization.readAccessURL
+                )
+            }
+        }
+        return didStart
+    }
+
+    func hasLocalFileAccess(to fileURL: URL) -> Bool {
+        guard
+            LocalFileAccessPolicy.isSupportedHTMLFile(fileURL),
+            localFileAuthorization(containing: fileURL) != nil
+        else {
+            return false
+        }
+        return true
+    }
+
+    @discardableResult
+    func navigateToPreviouslyAuthorizedLocalFile(_ fileURL: URL) -> Bool {
+        guard
+            !isClosed,
+            let navigationURL = LocalFileAccessPolicy
+                .resolvedNavigationURL(fileURL),
+            LocalFileAccessPolicy.isSupportedHTMLFile(navigationURL),
+            localFileAuthorization(containing: navigationURL) != nil
+        else {
+            return false
+        }
+
+        approvedLocalFileURL = navigationURL
+        let didStart = load(
+            URLRequest(url: navigationURL),
+            purpose: .submitted
+        )
+        if !didStart {
+            approvedLocalFileURL = nil
+        }
+        return didStart
+    }
+
     func goBack() {
         guard let webView, webView.canGoBack else {
             return
@@ -190,6 +268,12 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func retry() {
         if let retryURL {
+            if
+                retryURL.isFileURL,
+                localFileAuthorization(containing: retryURL) != nil
+            {
+                approvedLocalFileURL = retryURL
+            }
             _ = navigate(to: retryURL)
             return
         }
@@ -311,6 +395,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
         errorState = nil
         contentBlockingNavigationState =
             ContentBlockingNavigationState<WKNavigation>()
+        releaseLocalFileAccess()
         onStateChange = nil
         onOpenTab = nil
         onOpenExternalURL = nil
@@ -364,10 +449,35 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
             break
         }
 
-        switch NavigationPolicy.decision(
-            for: navigationAction.request.url,
-            isMainFrame: isMainFrame
-        ) {
+        let localFileAuthorization = localFileAuthorization(
+            containing: navigationAction.request.url
+        )
+        let isAuthorizedLocalFile = LocalFileNavigationPolicy.allows(
+            targetURL: navigationAction.request.url,
+            sourceURL: navigationAction.sourceFrame.request.url,
+            readAccessURL: localFileAuthorization?.readAccessURL,
+            approvedURL: approvedLocalFileURL,
+            isMainFrame: isMainFrame,
+            isBackForwardNavigation:
+                navigationAction.navigationType == .backForward
+        )
+        if
+            isAuthorizedLocalFile,
+            isMainFrame,
+            LocalFileAccessPolicy.refersToSameFile(
+                navigationAction.request.url,
+                approvedLocalFileURL
+            )
+        {
+            approvedLocalFileURL = nil
+        }
+        let navigationDecision: NavigationPolicyDecision = isAuthorizedLocalFile
+            ? .allow
+            : NavigationPolicy.decision(
+                for: navigationAction.request.url,
+                isMainFrame: isMainFrame
+            )
+        switch navigationDecision {
         case .allow:
             if isMainFrame {
                 if ContentBlockingNavigationURL.isFragmentOnlyNavigation(
@@ -490,6 +600,12 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
         committedURL = webView.url
         currentDocumentURL = webView.url
+        if LocalFileAccessPolicy.refersToSameFile(
+            webView.url,
+            approvedLocalFileURL
+        ) {
+            approvedLocalFileURL = nil
+        }
         applyContentBlockingPolicyForCommittedPage(
             mode: contentBlockingNavigationState.commit(navigation)
         )
@@ -581,6 +697,35 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
             return false
         }
 
+        if
+            let approvedLocalFileURL,
+            !LocalFileAccessPolicy.refersToSameFile(
+                url,
+                approvedLocalFileURL
+            )
+        {
+            self.approvedLocalFileURL = nil
+        }
+        let localFileReadAccessURL: URL?
+        if url.isFileURL {
+            guard
+                let authorization = localFileAuthorization(containing: url),
+                LocalFileNavigationPolicy.allows(
+                    targetURL: url,
+                    sourceURL: currentDocumentURL,
+                    readAccessURL: authorization.readAccessURL,
+                    approvedURL: approvedLocalFileURL,
+                    isMainFrame: true,
+                    isBackForwardNavigation: false
+                )
+            else {
+                return false
+            }
+            localFileReadAccessURL = authorization.readAccessURL
+        } else {
+            localFileReadAccessURL = nil
+        }
+
         pendingNavigationURL = url
         retryURL = url
         observedURL = url
@@ -615,11 +760,25 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
             navigation = BrowserPerformanceSignposts.signposter.withIntervalSignpost(
                 "AddressSubmission"
             ) {
-                webView.load(request)
+                if let localFileReadAccessURL {
+                    webView.loadFileURL(
+                        url,
+                        allowingReadAccessTo: localFileReadAccessURL
+                    )
+                } else {
+                    webView.load(request)
+                }
             }
             submittedNavigation = navigation
         } else {
-            navigation = webView.load(request)
+            if let localFileReadAccessURL {
+                navigation = webView.loadFileURL(
+                    url,
+                    allowingReadAccessTo: localFileReadAccessURL
+                )
+            } else {
+                navigation = webView.load(request)
+            }
             if purpose == .firstBlank {
                 firstBlankNavigation = navigation
             }
@@ -905,6 +1064,14 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     private func presentUnsupportedNavigation(url: URL?) {
         let scheme = url?.scheme?.lowercased()
+        if scheme == "file" {
+            presentError(
+                title: "Local File Blocked",
+                message: "Open local HTML from the address field or a bookmark, then approve its containing folder.",
+                recoveryActionTitle: nil
+            )
+            return
+        }
         presentError(
             title: "Unsupported Address",
             message: scheme.map {
@@ -923,6 +1090,47 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
             )
             return
         }
+    }
+
+    private func releaseLocalFileAccess() {
+        for authorization in localFileAuthorizations {
+            authorization.securityScopedURL
+                .stopAccessingSecurityScopedResource()
+        }
+        localFileAuthorizations.removeAll()
+        approvedLocalFileURL = nil
+    }
+
+    private func localFileAuthorization(
+        containing fileURL: URL?
+    ) -> LocalFileAuthorization? {
+        guard let fileURL else {
+            return nil
+        }
+        return localFileAuthorizations
+            .filter {
+                LocalFileAccessPolicy.contains(
+                    fileURL,
+                    in: $0.readAccessURL
+                )
+            }
+            .max {
+                $0.readAccessURL.pathComponents.count
+                    < $1.readAccessURL.pathComponents.count
+            }
+    }
+
+    private func removeLocalFileAuthorization(readAccessURL: URL) {
+        guard let index = localFileAuthorizations.firstIndex(where: {
+            LocalFileAccessPolicy.refersToSameFile(
+                $0.readAccessURL,
+                readAccessURL
+            )
+        }) else {
+            return
+        }
+        let authorization = localFileAuthorizations.remove(at: index)
+        authorization.securityScopedURL.stopAccessingSecurityScopedResource()
     }
 
     private func show(_ presentation: BrowserErrorPresentation?) {

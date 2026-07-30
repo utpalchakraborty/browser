@@ -18,6 +18,32 @@ final class BookmarkIntegrationTests: XCTestCase {
         XCTAssertEqual(candidate.suggestedTitle, "Example Guide")
     }
 
+    func testCurrentPageCandidateAcceptsLoadedLocalHTML() throws {
+        let titledCandidate = try XCTUnwrap(
+            BookmarkPageCandidate.currentPage(
+                url: URL(string: "file:///tmp/My%20Pages/index1.html#details"),
+                title: "  Local Movies  ",
+                isLoading: false,
+                hasVisibleError: false
+            )
+        )
+        let untitledCandidate = try XCTUnwrap(
+            BookmarkPageCandidate.currentPage(
+                url: URL(string: "file:///tmp/My%20Pages/index1.html"),
+                title: "   ",
+                isLoading: false,
+                hasVisibleError: false
+            )
+        )
+
+        XCTAssertEqual(
+            titledCandidate.url.absoluteString,
+            "file:///tmp/My%20Pages/index1.html#details"
+        )
+        XCTAssertEqual(titledCandidate.suggestedTitle, "Local Movies")
+        XCTAssertEqual(untitledCandidate.suggestedTitle, "index1.html")
+    }
+
     func testCurrentPageCandidateFallsBackToHostAndRejectsTransientPages() {
         XCTAssertEqual(
             BookmarkPageCandidate.currentPage(

@@ -43,6 +43,17 @@ final class ContentBlockingNavigationStateTests: XCTestCase {
                 to: try XCTUnwrap(URL(string: "https://example.com/path?q=two#second"))
             )
         )
+
+        let localBase = URL(fileURLWithPath: "/tmp/local/index.html")
+        let localFragment = try XCTUnwrap(
+            URL(string: "\(localBase.absoluteString)#details")
+        )
+        XCTAssertTrue(
+            ContentBlockingNavigationURL.isFragmentOnlyNavigation(
+                from: localBase,
+                to: localFragment
+            )
+        )
     }
 
     func testNavigationCanOnlyStrengthenUntilItsDocumentCommits() {

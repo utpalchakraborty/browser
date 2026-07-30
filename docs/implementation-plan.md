@@ -6,7 +6,7 @@ green and normal workflow approved, with the manual recovery exercise pending;
 Phase 4 complete with every functional, privacy, packaging, network, container,
 and performance/resource gate green; the minimal Phase 5 implementation is
 complete and accepted, with automated and normal-session gates green
-Last updated: 2026-07-28
+Last updated: 2026-07-30
 Architecture: [architecture.md](architecture.md)
 
 ## 1. Confirmed product constraints
@@ -724,6 +724,20 @@ features.
 ### Goal
 
 Implement only browser behaviors proven necessary during the pilot.
+
+### Completed pilot follow-up
+
+- Submitted absolute `.html`/`.htm` paths and local `file:///` URLs use a
+  directory-only macOS consent panel, per-tab memory-only read grants, and
+  WebKit's bounded local-file loading API. Local assets and same-folder page
+  navigation work without granting remote pages arbitrary filesystem access.
+- Loaded local HTML can be explicitly bookmarked. The absolute file URL
+  survives relaunch, while its folder grant does not; opening the bookmark in a
+  new tab or process presents the same consent panel.
+- Focused address, authorization, containment, navigation-policy,
+  content-blocking-state, bookmark-model, persistence, and real-WKWebView tests
+  pass. The normal-session local-file and bookmark smoke test passed on
+  2026-07-30.
 
 ### Candidate work
 

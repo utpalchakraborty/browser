@@ -56,6 +56,28 @@ final class BookmarkRepositoryTests: XCTestCase {
         )
     }
 
+    func testLocalHTMLBookmarkPersistsAndReloadsWithoutFileAccess() async throws {
+        let repository = BookmarkRepository(directoryURL: directoryURL)
+        let localURL = try XCTUnwrap(
+            URL(string: "file:///Users/example/Movies/index1.html#favorites")
+        )
+        let result = try await repository.add(
+            url: localURL,
+            title: "Local Movies",
+            at: Date(timeIntervalSince1970: 1_000)
+        )
+        guard case let .added(added) = result else {
+            return XCTFail("Expected a newly added local bookmark")
+        }
+
+        let reloaded = try await BookmarkRepository(
+            directoryURL: directoryURL
+        ).bookmarks()
+
+        XCTAssertEqual(reloaded, [added])
+        XCTAssertEqual(reloaded.first?.url, localURL)
+    }
+
     func testCanonicalDuplicateReturnsExistingBookmarkWithoutWriting() async throws {
         let repository = BookmarkRepository(directoryURL: directoryURL)
         let firstResult = try await repository.add(

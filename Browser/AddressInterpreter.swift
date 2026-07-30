@@ -36,6 +36,7 @@ nonisolated enum SearchProvider: String, CaseIterable, Sendable {
 
 nonisolated enum AddressInterpretation: Equatable, Sendable {
     case navigate(URL)
+    case localFile(URL)
     case failure(AddressInterpretationError)
 }
 
@@ -47,6 +48,8 @@ nonisolated enum AddressSubmissionIntent: Equatable, Sendable {
 nonisolated enum AddressInterpretationError: Error, Equatable, Sendable {
     case emptyInput
     case malformedURL
+    case invalidLocalFile
+    case unsupportedLocalFileType
     case unsupportedScheme(String)
 }
 
@@ -54,11 +57,15 @@ extension AddressInterpretationError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .emptyInput:
-            "Enter a web address or search term."
+            "Enter a web address, local HTML path, or search term."
         case .malformedURL:
             "That web address is not valid."
+        case .invalidLocalFile:
+            "That local file address is not valid."
+        case .unsupportedLocalFileType:
+            "Browser can open local .html and .htm files."
         case .unsupportedScheme:
-            "Browser can open only HTTP and HTTPS addresses."
+            "Browser can open HTTP and HTTPS addresses or approved local HTML files."
         }
     }
 }
@@ -79,6 +86,12 @@ nonisolated struct AddressInterpreter: Sendable {
             return .failure(.emptyInput)
         }
 
+        if trimmed.hasPrefix("/"), !trimmed.hasPrefix("//") {
+            return Self.localFileInterpretation(
+                for: URL(fileURLWithPath: trimmed)
+            )
+        }
+
         if
             intent == .completeDotCom,
             let url = Self.dotComShortcutURL(from: trimmed)
@@ -88,6 +101,11 @@ nonisolated struct AddressInterpreter: Sendable {
 
         if let explicitScheme = Self.explicitScheme(in: trimmed) {
             let normalizedScheme = explicitScheme.lowercased()
+            if normalizedScheme == "file" {
+                return Self.localFileInterpretation(
+                    for: URL(string: trimmed)
+                )
+            }
             if ["http", "https"].contains(normalizedScheme) {
                 guard let url = Self.validWebURL(from: trimmed) else {
                     return .failure(.malformedURL)
@@ -112,6 +130,23 @@ nonisolated struct AddressInterpreter: Sendable {
         }
 
         return .navigate(searchProvider.searchURL(for: trimmed))
+    }
+
+    private static func localFileInterpretation(
+        for url: URL?
+    ) -> AddressInterpretation {
+        guard
+            let url,
+            let normalizedURL = LocalFileAccessPolicy
+                .standardizedNavigationURL(url),
+            !url.path.isEmpty
+        else {
+            return .failure(.invalidLocalFile)
+        }
+        guard LocalFileAccessPolicy.isSupportedHTMLFile(normalizedURL) else {
+            return .failure(.unsupportedLocalFileType)
+        }
+        return .localFile(normalizedURL)
     }
 
     private static func dotComShortcutURL(from input: String) -> URL? {

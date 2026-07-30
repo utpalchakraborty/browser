@@ -28,8 +28,30 @@ Last updated: 2026-07-30
   normal-session tab smoke test on 2026-07-28 and confirmed everything works.
 - A direct, unmodified primary click on a top-level `magnet:` link now hands the
   untouched URL to the application registered for magnet links in macOS. The
-  focused Debug `NavigationPolicyTests` run passes 12 tests; the normal-session
-  handoff smoke test is pending.
+  focused Debug `NavigationPolicyTests` run passes 12 tests. The user confirmed
+  the normal-session handoff on 2026-07-30, and the checkpoint is published as
+  `3f74d86`.
+- Absolute `.html`/`.htm` paths and local `file:///` URLs now open after the user
+  approves the exact containing folder through macOS. Per-tab grants are
+  read-only and memory-only, support local assets and sibling pages, and end
+  when the tab closes. A focused 39-test Debug run passes, including real
+  WKWebView coverage for sibling assets, sibling-page navigation, and Back
+  across two approved folders. The signed Release bundle passes exact
+  entitlement and packaging verification. Artifact:
+  `.build/DerivedData/Logs/Test/Test-Browser-2026.07.30_03-51-10--0400.xcresult`.
+  The user completed the normal-session folder-panel smoke test on 2026-07-30,
+  confirmed the MovieStuff page works, and observed visibly faster loading than
+  Chrome.
+- Loaded local HTML pages can now be added with the toolbar star or Command-D.
+  The explicit file URL persists with the bookmark, while folder authorization
+  remains per-tab and memory-only. The same tab reuses its live grant; a new tab
+  or app relaunch asks again. A focused 15-test Debug run covers bookmark URL
+  validation, symlink identity, current-page candidacy, repository reload, and
+  real WKWebView reopening across remote and local pages. Artifact:
+  `.build/FocusedBookmarkTests4.xcresult`. The full suite was intentionally not
+  rerun; the optimized Release build and static signature/entitlement verifier
+  pass. The user completed the normal-session local-file and bookmark smoke test
+  on 2026-07-30 and confirmed local pages load and can be saved as bookmarks.
 
 ## Current phase
 
@@ -54,14 +76,15 @@ Phase 4 blocker and popup checkpoint works in hands-on use and approved it.
 The browser is now a usable native multi-tab pilot. It accepts HTTP and HTTPS
 URLs, infers HTTPS for plausible hosts, searches plain text, exposes the
 selected tab's WebKit navigation state through responsive AppKit controls, and
-creates no passive visit history. Open tabs, their order, URLs, titles, and
-back/forward state remain memory-only. Application-owned persistence is limited
-to explicit bookmarks, required preferences and window geometry, exact-host
-blocker exceptions, and last-valid blocker identifiers. The Phase 1 WKWebView
-GO decision remains unchanged.
+opens user-approved local HTML without creating passive visit history. Open
+tabs, their order, URLs, titles, back/forward state, and local-folder grants
+remain memory-only. Application-owned persistence is limited to explicit
+bookmarks, required preferences and window geometry, exact-host blocker
+exceptions, and last-valid blocker identifiers. The Phase 1 WKWebView GO
+decision remains unchanged.
 
 Direct, unmodified primary clicks on top-level `magnet:` links are the sole
-external-scheme exception. Browser cancels WebKit navigation and passes the
+external-scheme handoff. Browser cancels WebKit navigation and passes the
 original URL to macOS without logging or persisting it. Scripted, synthetic,
 modified, subframe, address-field, and other external-scheme navigation remains
 blocked.
@@ -144,6 +167,8 @@ visible tab behavior works.
 - Add, edit, delete, title/URL search, duplicate handling, relaunch persistence,
   and open workflows are implemented. Phase 5 now routes bookmark opening and
   creation through the selected tab.
+- Explicit local `.html`/`.htm` bookmarks use the same flat library and schema
+  as web bookmarks. Only the file URL persists; filesystem approval never does.
 - The bookmark library is intentionally a flat, keyboard-first searchable
   manager with no persistent bookmarks bar. The user approved this cleaner
   workflow; folder hierarchy is deferred until real use demonstrates a need.
@@ -453,9 +478,8 @@ automated gate.
 
 ## Next action
 
-Smoke-test a direct magnet-link click from the normal Release app. Confirm that
-the registered torrent application opens exactly once and the source tab stays
-unchanged; then publish this focused checkpoint if accepted.
+Use the accepted local-file and bookmark workflow in ordinary browsing before
+selecting another Phase 6 daily-driver hardening feature.
 
 Phase 5 is complete. Use the accepted minimal tab workflow in ordinary browsing
 before selecting any Phase 6 daily-driver hardening feature; reordering,

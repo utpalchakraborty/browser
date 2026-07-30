@@ -24,7 +24,7 @@ nonisolated struct BookmarkPageCandidate: Equatable, Sendable {
         return BookmarkPageCandidate(
             url: canonicalURL,
             suggestedTitle: trimmedTitle.isEmpty
-                ? canonicalURL.host ?? canonicalURL.absoluteString
+                ? Bookmark.defaultTitle(for: canonicalURL)
                 : trimmedTitle
         )
     }

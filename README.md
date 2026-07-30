@@ -7,9 +7,9 @@ includes no third-party runtime dependencies. Startup, CPU, and memory budgets
 are release gates.
 
 Phase 3 adds explicit, local bookmarks: use the toolbar star or Command-D to add
-or edit the selected tab's page, and use the searchable Bookmarks manager to
-add, edit, delete, or open saved pages. Opening a bookmark navigates the selected
-tab.
+or edit the selected tab's web or local HTML page, and use the searchable
+Bookmarks manager to add, edit, delete, or open saved pages. Opening a bookmark
+navigates the selected tab.
 
 This is now a usable native multi-tab pilot, not yet the daily-driver release.
 It remembers the main window's size and location across relaunch while still
@@ -108,7 +108,10 @@ make run
 This builds the Release configuration and opens
 `.build/DerivedData/Build/Products/Release/Browser.app`. Enter an explicit HTTP
 or HTTPS URL, a plausible hostname such as `example.com`, or search text in the
-address field and press Return.
+address field and press Return. You can also paste an absolute `.html` or `.htm`
+path such as `/Users/example/site/index.html`, or its `file:///` URL. Browser
+then asks you to approve that file's exact containing folder so local images,
+scripts, styles, and sibling pages can load.
 
 - Command-L focuses the address field.
 - Command-T creates and selects a fresh blank tab, then focuses the address
@@ -119,6 +122,9 @@ address field and press Return.
 - Shift-Command-W closes the browser window.
 - A direct, unmodified click on a `magnet:` link opens it with the application
   registered for magnet links in macOS.
+- A submitted or bookmarked local HTML path opens after you approve its
+  containing folder. Access is read-only, stays in memory only for that tab,
+  and ends when the tab closes; it is not restored on relaunch.
 - Command-[ and Command-] navigate Back and Forward.
 - Command-R reloads.
 - Command-period stops an active load.
@@ -164,6 +170,18 @@ the original URL to macOS without logging or persisting it. Address-field entry,
 scripted or subframe navigation, modified clicks, and every other external
 scheme remain blocked.
 
+Local-file access is limited to `.html` and `.htm` pages submitted in the
+address field or explicitly opened from the Bookmarks manager. Browser uses
+macOS's folder-selection consent flow and grants WebKit read access only to the
+approved containing folder. A matching grant is reused only within that live
+tab. Local same-frame links within the folder, reload, and back/forward work;
+remote pages and unapproved file URLs cannot trigger access.
+
+Explicitly adding a local page to Bookmarks stores its absolute file URL, just
+as saving a web bookmark stores its URL. Browser never stores the folder grant,
+a security-scoped bookmark, or a recent-file list. Opening that bookmark in a
+different tab or after relaunch therefore asks for folder approval again.
+
 ## Website data and blocking resets
 
 Privacy > Manage Website Data shows cookies separately from WebKit's broader
@@ -205,8 +223,10 @@ in-app recovery reset deliberately keeps those preserved copies. For complete
 bookmark erasure, quit Browser and also delete every preserved
 `Bookmarks.corrupt.*.json` file from this directory.
 
-Bookmarks are the only application-owned URLs written by this feature. Browser
-still creates no visit history and sends no application-owned telemetry.
+Bookmarks are the only application-owned URLs written by this feature. They may
+include an explicitly saved local HTML path, but never its filesystem grant.
+Browser still creates no visit history and sends no application-owned
+telemetry.
 
 Start with [project status](docs/status.md), then see the approved
 [architecture](docs/architecture.md), the phased
