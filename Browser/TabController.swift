@@ -35,6 +35,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     var onStateChange: ((TabController) -> Void)?
     var onOpenTab: ((URLRequest, NewTabNavigationDisposition) -> Void)?
+    var onOpenExternalURL: ((URL) -> Bool)?
 
     private let contentBlockingCoordinator: ContentBlockingCoordinator?
     private var webViewFactory: WebViewFactory?
@@ -312,6 +313,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
             ContentBlockingNavigationState<WKNavigation>()
         onStateChange = nil
         onOpenTab = nil
+        onOpenExternalURL = nil
     }
 
     func webView(
@@ -323,6 +325,26 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
             decisionHandler(.cancel)
             return
         }
+        let isMainFrame = navigationAction.targetFrame?.isMainFrame == true
+        let externalDisposition = ExternalNavigationPolicy.disposition(
+            for: navigationAction.request.url,
+            isLinkActivation: navigationAction.navigationType == .linkActivated,
+            buttonNumber: navigationAction.buttonNumber,
+            modifierFlags: navigationAction.modifierFlags,
+            targetsTopLevelContext:
+                navigationAction.targetFrame?.isMainFrame ?? true
+        )
+        if case let .open(url) = externalDisposition {
+            decisionHandler(.cancel)
+            if isMainFrame {
+                applyContentBlockingPolicyForCommittedPage(
+                    mode: contentBlockingNavigationState.cancelAwaitingRequest()
+                )
+            }
+            openExternalURL(url)
+            return
+        }
+
         let newTabDisposition = NewContextNavigationPolicy.disposition(
             url: navigationAction.request.url,
             isLinkActivation: navigationAction.navigationType == .linkActivated,
@@ -342,7 +364,6 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
             break
         }
 
-        let isMainFrame = navigationAction.targetFrame?.isMainFrame == true
         switch NavigationPolicy.decision(
             for: navigationAction.request.url,
             isMainFrame: isMainFrame
@@ -424,6 +445,19 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
         guard acceptsDelegateCallback(from: webView) else {
             return nil
         }
+        let externalDisposition = ExternalNavigationPolicy.disposition(
+            for: navigationAction.request.url,
+            isLinkActivation: navigationAction.navigationType == .linkActivated,
+            buttonNumber: navigationAction.buttonNumber,
+            modifierFlags: navigationAction.modifierFlags,
+            targetsTopLevelContext:
+                navigationAction.targetFrame?.isMainFrame ?? true
+        )
+        if case let .open(url) = externalDisposition {
+            openExternalURL(url)
+            return nil
+        }
+
         let disposition = NewContextNavigationPolicy.disposition(
             url: navigationAction.request.url,
             isLinkActivation: navigationAction.navigationType == .linkActivated,
@@ -878,6 +912,17 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
             } ?? "Browser blocked a navigation without a valid HTTP or HTTPS address.",
             recoveryActionTitle: nil
         )
+    }
+
+    private func openExternalURL(_ url: URL) {
+        guard onOpenExternalURL?(url) == true else {
+            presentError(
+                title: "Magnet Link Not Opened",
+                message: "Browser couldn’t open this magnet link. Make sure an application that handles magnet links is installed.",
+                recoveryActionTitle: nil
+            )
+            return
+        }
     }
 
     private func show(_ presentation: BrowserErrorPresentation?) {

@@ -3,6 +3,108 @@ import XCTest
 @testable import Browser
 
 final class NavigationPolicyTests: XCTestCase {
+    func testDirectPrimaryMagnetLinkRequestsExternalOpen() throws {
+        let urls = try [
+            XCTUnwrap(
+                URL(
+                    string: "magnet:?xt=urn:btih:0123456789ABCDEF&dn=Example%20File&tr=udp%3A%2F%2Ftracker.example%3A80&tr=udp%3A%2F%2Fbackup.example%3A1337"
+                )
+            ),
+            XCTUnwrap(URL(string: "MAGNET:?xt=urn:btih:ABCDEF")),
+        ]
+
+        for url in urls {
+            XCTAssertEqual(
+                ExternalNavigationPolicy.disposition(
+                    for: url,
+                    isLinkActivation: true,
+                    buttonNumber: 1,
+                    modifierFlags: [],
+                    targetsTopLevelContext: true
+                ),
+                .open(url)
+            )
+        }
+    }
+
+    func testMagnetHandoffRequiresDirectUnmodifiedPrimaryTopLevelLink() {
+        let url = URL(string: "magnet:?xt=urn:btih:ABCDEF")
+
+        XCTAssertEqual(
+            ExternalNavigationPolicy.disposition(
+                for: url,
+                isLinkActivation: false,
+                buttonNumber: 1,
+                modifierFlags: [],
+                targetsTopLevelContext: true
+            ),
+            .none
+        )
+        for buttonNumber in [0, 2, 3] {
+            XCTAssertEqual(
+                ExternalNavigationPolicy.disposition(
+                    for: url,
+                    isLinkActivation: true,
+                    buttonNumber: buttonNumber,
+                    modifierFlags: [],
+                    targetsTopLevelContext: true
+                ),
+                .none
+            )
+        }
+        for modifier: NSEvent.ModifierFlags in [
+            .command,
+            .control,
+            .option,
+            .shift,
+        ] {
+            XCTAssertEqual(
+                ExternalNavigationPolicy.disposition(
+                    for: url,
+                    isLinkActivation: true,
+                    buttonNumber: 1,
+                    modifierFlags: modifier,
+                    targetsTopLevelContext: true
+                ),
+                .none
+            )
+        }
+        XCTAssertEqual(
+            ExternalNavigationPolicy.disposition(
+                for: url,
+                isLinkActivation: true,
+                buttonNumber: 1,
+                modifierFlags: [],
+                targetsTopLevelContext: false
+            ),
+            .none
+        )
+    }
+
+    func testExternalNavigationPolicyDoesNotBroadenOtherSchemes() {
+        let cases: [URL?] = [
+            URL(string: "https://example.com"),
+            URL(string: "mailto:user@example.com"),
+            URL(string: "file:///tmp/private"),
+            URL(string: "custom-scheme://host/path"),
+            nil,
+        ]
+
+        for url in cases {
+            XCTAssertEqual(
+                ExternalNavigationPolicy.disposition(
+                    for: url,
+                    isLinkActivation: true,
+                    buttonNumber: 1,
+                    modifierFlags: [],
+                    targetsTopLevelContext: true
+                ),
+                .none,
+                String(describing: url)
+            )
+        }
+    }
+
     func testTopLevelHTTPAndHTTPSNavigationIsAllowed() {
         XCTAssertEqual(
             NavigationPolicy.decision(
@@ -75,6 +177,7 @@ final class NavigationPolicyTests: XCTestCase {
         let cases: [URL?] = [
             URL(string: "file:///tmp/private"),
             URL(string: "mailto:user@example.com"),
+            URL(string: "magnet:?xt=urn:btih:ABCDEF"),
             URL(string: "javascript:alert(1)"),
             URL(string: "data:text/html,page"),
             URL(string: "custom-scheme://host/path"),

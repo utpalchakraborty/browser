@@ -32,6 +32,7 @@ final class BrowserWindowController: NSWindowController,
 
     private let chromeView: BrowserChromeView
     private let contentBlockingCoordinator: ContentBlockingCoordinator?
+    private let externalURLOpener: (URL) -> Bool
     private var addressInterpreter: AddressInterpreter
     private var searchProvider: SearchProvider
     private var bookmarkCoordinator: BookmarkCoordinator?
@@ -49,10 +50,14 @@ final class BrowserWindowController: NSWindowController,
     init(
         searchProvider: SearchProvider = .defaultProvider,
         frameAutosaveName: NSWindow.FrameAutosaveName? = nil,
-        contentBlockingCoordinator: ContentBlockingCoordinator? = nil
+        contentBlockingCoordinator: ContentBlockingCoordinator? = nil,
+        externalURLOpener: @escaping (URL) -> Bool = {
+            NSWorkspace.shared.open($0)
+        }
     ) {
         self.searchProvider = searchProvider
         self.contentBlockingCoordinator = contentBlockingCoordinator
+        self.externalURLOpener = externalURLOpener
         let initialTab = TabController(
             contentBlockingCoordinator: contentBlockingCoordinator
         )
@@ -364,6 +369,7 @@ final class BrowserWindowController: NSWindowController,
         tab.onOpenTab = { [weak self] request, disposition in
             self?.openTab(request: request, disposition: disposition)
         }
+        tab.onOpenExternalURL = externalURLOpener
     }
 
     private func openTab(

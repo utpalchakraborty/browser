@@ -6,6 +6,41 @@ nonisolated enum NavigationPolicyDecision: Equatable, Sendable {
     case cancel
 }
 
+nonisolated enum ExternalNavigationDisposition: Equatable, Sendable {
+    case open(URL)
+    case none
+}
+
+nonisolated enum ExternalNavigationPolicy {
+    private static let browserIntentModifiers: NSEvent.ModifierFlags = [
+        .command,
+        .control,
+        .option,
+        .shift,
+    ]
+
+    static func disposition(
+        for url: URL?,
+        isLinkActivation: Bool,
+        buttonNumber: Int,
+        modifierFlags: NSEvent.ModifierFlags,
+        targetsTopLevelContext: Bool
+    ) -> ExternalNavigationDisposition {
+        guard
+            let url,
+            url.scheme?.lowercased() == "magnet",
+            isLinkActivation,
+            buttonNumber == 1,
+            targetsTopLevelContext,
+            modifierFlags.intersection(browserIntentModifiers).isEmpty
+        else {
+            return .none
+        }
+
+        return .open(url)
+    }
+}
+
 nonisolated enum NavigationPolicy {
     static func decision(
         for url: URL?,

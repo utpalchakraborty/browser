@@ -117,6 +117,8 @@ address field and press Return.
 - Command-W closes the selected tab. Closing the sole remaining tab replaces it
   with a fresh blank tab and focuses the address field.
 - Shift-Command-W closes the browser window.
+- A direct, unmodified click on a `magnet:` link opens it with the application
+  registered for magnet links in macOS.
 - Command-[ and Command-] navigate Back and Forward.
 - Command-R reloads.
 - Command-period stops an active load.
@@ -155,6 +157,12 @@ same normal profile and receives the current compiled blocking rules and exact-
 host site policy. Content blocking prevents many advertising popup triggers and
 overlays before they run, but popup denial remains an independent backstop
 rather than relying on a filter-list match.
+
+Magnet handoff is limited to direct, unmodified primary clicks targeting the
+top-level page or a new context. Browser cancels the WebKit navigation and gives
+the original URL to macOS without logging or persisting it. Address-field entry,
+scripted or subframe navigation, modified clicks, and every other external
+scheme remain blocked.
 
 ## Website data and blocking resets
 

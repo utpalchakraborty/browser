@@ -644,9 +644,9 @@ normal-session user smoke test pass.
 - Route an unmodified direct, physically pointer-activated HTTP or HTTPS anchor
   with `target="_blank"` to a new foreground tab.
 - Continue denying scripted `window.open`, script-triggered anchors,
-  target-blank forms, keyboard-created contexts, unsupported schemes, alternate
-  mouse buttons, unsupported modifier combinations, separate app windows, and
-  tab-unders.
+  target-blank forms, keyboard-created contexts, unsupported external schemes,
+  alternate mouse buttons, unsupported modifier combinations, separate app
+  windows, and tab-unders.
 - Ensure every new WKWebView uses the normal profile, current compiled rules,
   and current site policy through WebViewFactory.
 - Apply blocker and exception changes coherently across resident tabs and reload
@@ -732,7 +732,7 @@ Implement only browser behaviors proven necessary during the pilot.
 - Find in page.
 - HTTP authentication prompts.
 - JavaScript alert, confirm, and prompt presentation.
-- Safe external-scheme handoff.
+- Safe external-scheme handoff beyond the direct-click, magnet-only allowlist.
 - Permission UI for camera, microphone, location, notifications, and clipboard,
   adding entitlements only when required.
 - Full-screen and media behavior.

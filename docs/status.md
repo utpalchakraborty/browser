@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-07-28
+Last updated: 2026-07-30
 
 ## Restart snapshot
 
@@ -26,6 +26,10 @@ Last updated: 2026-07-28
   interaction performance, ten-tab switching, ten-tab resources, WebContent
   termination, and the read-only no-history audit pass. The user completed the
   normal-session tab smoke test on 2026-07-28 and confirmed everything works.
+- A direct, unmodified primary click on a top-level `magnet:` link now hands the
+  untouched URL to the application registered for magnet links in macOS. The
+  focused Debug `NavigationPolicyTests` run passes 12 tests; the normal-session
+  handoff smoke test is pending.
 
 ## Current phase
 
@@ -55,6 +59,12 @@ back/forward state remain memory-only. Application-owned persistence is limited
 to explicit bookmarks, required preferences and window geometry, exact-host
 blocker exceptions, and last-valid blocker identifiers. The Phase 1 WKWebView
 GO decision remains unchanged.
+
+Direct, unmodified primary clicks on top-level `magnet:` links are the sole
+external-scheme exception. Browser cancels WebKit navigation and passes the
+original URL to macOS without logging or persisting it. Scripted, synthetic,
+modified, subframe, address-field, and other external-scheme navigation remains
+blocked.
 
 ## Phase 5 minimal tabs complete and accepted
 
@@ -442,6 +452,10 @@ compatibility remains a hands-on regression check rather than a stable
 automated gate.
 
 ## Next action
+
+Smoke-test a direct magnet-link click from the normal Release app. Confirm that
+the registered torrent application opens exactly once and the source tab stays
+unchanged; then publish this focused checkpoint if accepted.
 
 Phase 5 is complete. Use the accepted minimal tab workflow in ordinary browsing
 before selecting any Phase 6 daily-driver hardening feature; reordering,
