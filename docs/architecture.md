@@ -214,6 +214,7 @@ TabController is main-actor isolated and owns:
 - its WKNavigationDelegate and WKUIDelegate behavior;
 - observations for URL, title, progress, loading, and back/forward capability;
 - transient navigation URLs and load errors;
+- transient per-tab page zoom held only by the resident WKWebView;
 - an independent ContentBlockingNavigationState for navigation-race handling;
 - memory-only read grants for explicitly approved local-page folders; and
 - lifecycle teardown for observations, delegates, loads, blocker attachment
@@ -236,6 +237,10 @@ that memory use is unacceptable, a later policy may discard least-recently-used
 background tabs under memory pressure. Discarding loses page JavaScript, form,
 media, and back/forward state, so it must be visible and never introduced only
 as a hidden optimization.
+
+Page zoom uses WKWebView's public `pageZoom` API and remains independent for
+each resident tab. It is not written to preferences, browser-owned storage, or
+the website data store; closing the tab or quitting the app discards it.
 
 WebKit chooses how web-content processes are shared. The application will not
 try to create or tune process pools.

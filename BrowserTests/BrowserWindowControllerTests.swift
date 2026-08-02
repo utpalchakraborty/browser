@@ -210,6 +210,86 @@ final class BrowserWindowControllerTests: XCTestCase {
         XCTAssertNil(controller.webView)
     }
 
+    func testPageZoomIsTransientAndIndependentPerTab() throws {
+        let controller = BrowserWindowController()
+        let window = try XCTUnwrap(controller.window)
+        window.orderFront(nil)
+        defer { window.close() }
+        controller.startWebViews(
+            profile: BrowserProfile(dataStoreIdentifier: UUID()),
+            viewCount: 2,
+            initialURL: URL(string: "about:blank")!
+        )
+
+        let firstTabID = controller.selectedTabID
+        let secondTabID = try XCTUnwrap(
+            controller.tabIDs.first { $0 != firstTabID }
+        )
+
+        XCTAssertEqual(controller.webView?.pageZoom, PageZoom.actualSize)
+        controller.zoomIn(nil)
+        controller.zoomIn(nil)
+        XCTAssertEqual(controller.webView?.pageZoom, 1.25)
+
+        controller.selectTab(id: secondTabID)
+        XCTAssertEqual(controller.webView?.pageZoom, PageZoom.actualSize)
+        controller.zoomOut(nil)
+        XCTAssertEqual(controller.webView?.pageZoom, 0.90)
+
+        controller.selectTab(id: firstTabID)
+        XCTAssertEqual(controller.webView?.pageZoom, 1.25)
+        controller.resetPageZoom(nil)
+        XCTAssertEqual(controller.webView?.pageZoom, PageZoom.actualSize)
+
+        controller.selectTab(id: secondTabID)
+        XCTAssertEqual(controller.webView?.pageZoom, 0.90)
+    }
+
+    func testPageZoomMenuValidationTracksSelectedWebViewAndLimits() throws {
+        let controller = BrowserWindowController()
+        let zoomInItem = NSMenuItem(
+            title: "Zoom In",
+            action: #selector(BrowserWindowController.zoomIn(_:)),
+            keyEquivalent: "+"
+        )
+        let zoomOutItem = NSMenuItem(
+            title: "Zoom Out",
+            action: #selector(BrowserWindowController.zoomOut(_:)),
+            keyEquivalent: "-"
+        )
+        let actualSizeItem = NSMenuItem(
+            title: "Actual Size",
+            action: #selector(BrowserWindowController.resetPageZoom(_:)),
+            keyEquivalent: "0"
+        )
+
+        XCTAssertFalse(controller.validateMenuItem(zoomInItem))
+        XCTAssertFalse(controller.validateMenuItem(zoomOutItem))
+        XCTAssertFalse(controller.validateMenuItem(actualSizeItem))
+
+        let window = try XCTUnwrap(controller.window)
+        window.orderFront(nil)
+        defer { window.close() }
+        controller.startWebView(
+            profile: BrowserProfile(dataStoreIdentifier: UUID())
+        )
+
+        XCTAssertTrue(controller.validateMenuItem(zoomInItem))
+        XCTAssertTrue(controller.validateMenuItem(zoomOutItem))
+        XCTAssertFalse(controller.validateMenuItem(actualSizeItem))
+
+        controller.zoomIn(nil)
+        XCTAssertTrue(controller.validateMenuItem(actualSizeItem))
+
+        controller.webView?.pageZoom = PageZoom.maximum
+        XCTAssertFalse(controller.validateMenuItem(zoomInItem))
+        XCTAssertTrue(controller.validateMenuItem(zoomOutItem))
+
+        controller.webView?.pageZoom = PageZoom.minimum
+        XCTAssertTrue(controller.validateMenuItem(zoomInItem))
+        XCTAssertFalse(controller.validateMenuItem(zoomOutItem))
+    }
+
     func testQueuedTabsBeforeProfileReadinessBothLoad() async throws {
         let controller = BrowserWindowController()
         let window = try XCTUnwrap(controller.window)

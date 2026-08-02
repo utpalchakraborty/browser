@@ -547,6 +547,27 @@ final class BrowserWindowController: NSWindowController,
     }
 
     @objc
+    func zoomIn(_ sender: Any?) {
+        guard let webView else {
+            return
+        }
+        webView.pageZoom = PageZoom.increased(from: webView.pageZoom)
+    }
+
+    @objc
+    func zoomOut(_ sender: Any?) {
+        guard let webView else {
+            return
+        }
+        webView.pageZoom = PageZoom.decreased(from: webView.pageZoom)
+    }
+
+    @objc
+    func resetPageZoom(_ sender: Any?) {
+        webView?.pageZoom = PageZoom.actualSize
+    }
+
+    @objc
     func retryNavigation(_ sender: Any?) {
         let tab = tabManager.selectedTab
         if tab.retryURL != nil || tab.webView?.url != nil {
@@ -701,6 +722,12 @@ final class BrowserWindowController: NSWindowController,
             return webView != nil && webView?.isLoading == false
         case #selector(stopLoading(_:)):
             return webView?.isLoading == true
+        case #selector(zoomIn(_:)):
+            return webView.map { PageZoom.canIncrease($0.pageZoom) } ?? false
+        case #selector(zoomOut(_:)):
+            return webView.map { PageZoom.canDecrease($0.pageZoom) } ?? false
+        case #selector(resetPageZoom(_:)):
+            return webView.map { !PageZoom.isActualSize($0.pageZoom) } ?? false
         case #selector(bookmarkCurrentPage(_:)):
             menuItem.title = bookmarkedCurrentPage == nil
                 ? "Add Bookmark…"

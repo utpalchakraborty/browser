@@ -487,6 +487,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         addMenu(editMenu, to: mainMenu)
 
+        let viewMenu = NSMenu(title: "View")
+        let zoomInItem = viewMenu.addItem(
+            withTitle: "Zoom In",
+            action: #selector(BrowserWindowController.zoomIn(_:)),
+            keyEquivalent: "+"
+        )
+        zoomInItem.target = navigationTarget
+        let zoomOutItem = viewMenu.addItem(
+            withTitle: "Zoom Out",
+            action: #selector(BrowserWindowController.zoomOut(_:)),
+            keyEquivalent: "-"
+        )
+        zoomOutItem.target = navigationTarget
+        let actualSizeItem = viewMenu.addItem(
+            withTitle: "Actual Size",
+            action: #selector(BrowserWindowController.resetPageZoom(_:)),
+            keyEquivalent: "0"
+        )
+        actualSizeItem.target = navigationTarget
+        addMenu(viewMenu, to: mainMenu)
+
         let navigationMenu = NSMenu(title: "Navigate")
         let openLocationItem = navigationMenu.addItem(
             withTitle: "Open Location",

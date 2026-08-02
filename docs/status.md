@@ -388,7 +388,9 @@ logical-entry counts were all zero; all 6 preference keys were allowlisted with
   and performance profiles, disabled scripted popups, and disabled AppKit
   restoration.
 - Standard Command-L, Command-[, Command-], Command-R, and Command-period
-  navigation shortcuts.
+  navigation shortcuts. Command-+, Command--, and Command-0 adjust or reset
+  transient page zoom independently for the selected tab; zoom is never
+  persisted.
 - No third-party runtime dependencies, telemetry, or application-owned visit
   history.
 
