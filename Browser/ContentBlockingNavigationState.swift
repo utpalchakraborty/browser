@@ -60,6 +60,21 @@ nonisolated struct ContentBlockingNavigationState<NavigationID: Hashable> {
         latestAttemptID != nil
     }
 
+    var hasUnboundApprovedAction: Bool {
+        latestAttemptID != nil && latestAttemptIsUnbound && !latestAttemptAwaitingAction
+    }
+
+    func canSettleUnboundAction(after navigationID: NavigationID) -> Bool {
+        guard hasUnboundApprovedAction,
+              navigationID != committedNavigationID,
+              let predecessor = attemptByNavigationID[navigationID],
+              let latestAttemptID
+        else {
+            return false
+        }
+        return predecessor &+ 1 == latestAttemptID
+    }
+
     @discardableResult
     mutating func beginRequest() -> ContentBlockingPolicyApplicationMode {
         _ = startAttempt(awaitingAction: true)

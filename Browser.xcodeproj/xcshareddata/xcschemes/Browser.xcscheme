@@ -80,6 +80,7 @@
                <Test Identifier = "NavigationPolicyTests" />
                <Test Identifier = "PageZoomTests" />
                <Test Identifier = "TabManagerTests" />
+               <Test Identifier = "FailedDocumentRecoveryTests" />
                <Test Identifier = "WebKitEdgeCaseTests" />
                <Test Identifier = "WebsiteDataControllerTests" />
                <Test Identifier = "WebsiteDataSnapshotTests" />

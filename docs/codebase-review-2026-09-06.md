@@ -1,6 +1,6 @@
 # Browser codebase review — 2026-09-06
 
-Status: G01/G02 were smoke-tested by the owner and committed locally on `main` as `76f7c28`. G03/G04 are implemented, background verified (159 Debug and 159 Release tests), and owner smoke accepted; the owner authorized their local commit. G05 remains proposed. G06's compiler dependency is fixed and build-verified through G02; benchmark execution remains deferred. Original finding evidence and audit-only checkpoints remain historical baseline evidence.
+Status: G01/G02 and G03/G04 are owner-smoke-accepted and committed locally on `main` as `76f7c28` and `8350f3d`. G05/G06 are implemented, verified within the recorded scope, and owner accepted for integration on local `main`. All six remediation groups are complete; the remaining interactive/manual verification follow-ups are recorded below. Original finding evidence and audit-only checkpoints remain historical baseline evidence.
 
 Audit baseline: branch `main`, commit `ea6528921be27d8d0a3ef9a2c7df955daa2b591c`. The working tree was clean at audit start. Source references describe that baseline. No applicable AGENTS.md was found in the project or ancestor directories.
 
@@ -14,7 +14,7 @@ Evidence labels: Confirmed (source), Confirmed (reproduced), Risk, and Debt. Pri
 
 ## Review map
 
-Eight findings: **3 core, 2 native presentation, 3 integration**. Priority: **1 P1, 6 P2, 1 P3**. Evidence: **4 Confirmed (reproduced), 4 Confirmed (source)**. These counts describe the original audit. G01–G04 are now implemented and owner smoke accepted; G05 remains the outstanding application fix, and G06 retains workload/timing verification only. This is a completed review pass, not a claim that every defect has been found.
+Eight findings: **3 core, 2 native presentation, 3 integration**. Priority: **1 P1, 6 P2, 1 P3**. Evidence: **4 Confirmed (reproduced), 4 Confirmed (source)**. These counts describe the original audit. G01–G04 are implemented and owner smoke accepted. G05/G06 are also implemented and owner accepted; all six application remediation groups are complete. This is a completed review pass, not a claim that every defect has been found.
 
 | Discussion area | Findings | Why it matters |
 | --- | --- | --- |
@@ -28,7 +28,7 @@ Useful counterevidence: per-tab teardown clears delegates, KVO observers, pendin
 
 ## Grouped plan of attack
 
-The initial plan was proposed only. The owner subsequently authorized G01/G02 and then G03/G04 implementation; G05 remains proposed. The owner subsequently authorized local commits after smoke acceptance of G01/G02 and G03/G04.
+The initial plan was proposed only. The owner subsequently authorized G01/G02, then G03/G04, and now continuing G05/G06. The owner subsequently authorized local commits after smoke acceptance of G01/G02 and G03/G04.
 
 | Group | Cohesive outcome | Findings | Prerequisites | Status |
 | --- | --- | --- | --- | --- |
@@ -36,8 +36,8 @@ The initial plan was proposed only. The owner subsequently authorized G01/G02 an
 | G02 | Make routine checks safe during ordinary desktop use | IN-02, IN-03 | None | Implemented; background verified; interactive acceptance deferred |
 | G03 | Make bookmark failure and recovery outcomes consistent | BE-02, BE-03 | None for repository checks; G02 for recovery UI acceptance | Implemented; background verified; owner smoke accepted |
 | G04 | Make Close act on the active window's content | FE-01 | G02 for keyboard acceptance | Implemented; hidden native menu verified; owner smoke accepted |
-| G05 | Recover an explicitly selected failed document with a site exception | FE-02 | G02 for WebKit/UI acceptance | Proposed |
-| G06 | Restore the supported performance build path | IN-01 | None for compilation; G02 for subsequent interactive gates | Compiler fix/build verified through G02; workload deferred |
+| G05 | Recover an explicitly selected failed document with a site exception | FE-02 | G02 for WebKit/UI acceptance | Implemented; background/package verified; owner accepted |
+| G06 | Restore the supported performance build path | IN-01 | None for compilation; G02 for subsequent interactive gates | Complete: clean build path and standalone workload pass |
 
 ### G01 — Reject unintended external-URI searches
 
@@ -147,7 +147,7 @@ Verify: actual Command-W with browser content, address editing, Bookmarks search
 
 ### FE-02 — A first document-level block has no usable site-exception recovery (P2, Confirmed (source))
 
-Status: Open.
+Status: G05 implemented, background/package verified, and owner accepted. See current continuation evidence below; specific owner smoke scenarios were not reported.
 
 Evidence: `Browser/BrowserWindowController.swift:969–995` requires a committed URL before enabling the site toggle; its action (`:639–667`) also derives the host solely from `tab.committedURL`. `Browser/TabController.swift:597–602` only sets that field when a document commits. Failure keeps the prior committed URL and offers retry (`:985–1004`, `Browser/BrowserPageError.swift`). `TabController.currentContentBlockingURL` (`:75–77`) prefers the old commit. The existing document-rule test (`BrowserTests/BrowserWindowControllerTests.swift:816–846`) first loads an excepted page through a helper that preinstalls the exception (`:949–1005`), so it cannot detect first-navigation recovery failure.
 
@@ -161,7 +161,7 @@ Verify: a deterministic document-blocking rule on the first destination, then th
 
 ### IN-01 — The performance entry point no longer compiles its bookmark benchmark (P2, Confirmed (reproduced))
 
-Status: Compiler dependency fixed as part of G02; compile verification recorded below. Workload execution and timing acceptance remain deferred.
+Status: Compiler dependency fixed as part of G02; G06 clean compilation, supported performance build, and standalone workload pass. See continuation evidence. Interactive performance acceptance remains separate.
 
 Evidence: `scripts/run-performance-tests.sh:37–50` compiles `Browser/Bookmark.swift`, `Browser/BookmarkSearch.swift`, `Browser/BookmarkRepository.swift`, and the benchmark main, but omits `Browser/LocalFileAccess.swift`. `Browser/Bookmark.swift:45–54,157` now directly references `LocalFileAccessPolicy`. Both `make performance` and `make performance-build` call this script, and the build-only exit occurs after the failing compiler command (`:52–54`).
 
@@ -392,3 +392,41 @@ Current outcome: G03/G04 implementation and background/package verification are 
 Remaining application work is **G05 / FE-02**: expose a failed main-document destination as an explicit site-exception recovery action, including when the tab has never committed a page, while guarding stale/redirected attempts and background-tab policy.
 
 **G06 / IN-01** has no outstanding compiler fix: dependency closure and build-only checks passed through G02/G03. Remaining verification is the separately invocable 10,000-bookmark workload and controlled timing acceptance. Full interactive UI/performance automation also remains deferred to a session where desktop input is available. No such workload or automation was run for this commit.
+
+
+## G05/G06 continuation — 2026-09-06
+
+Authorization: owner asked to continue G05/G06 after interruption. Live checkout was clean on `main` at `8350f3d`; G03/G04 had already been committed. Design written before implementation: [failed-document recovery and benchmark acceptance](g05-g06-failed-document-recovery-design.md).
+
+### Implemented G05 behavior
+
+- A current failed provisional HTTP(S) destination has a transient unique recovery identity. Privacy identifies the exact host and offers **Disable Blocking for <host> and Retry Failed Page**, including the first document in a blank tab and failures after a different committed host. Cancellation, TLS, non-web, and post-commit failures do not create that recovery action.
+- Validation captures the recovery identity. Replacement navigation, another selected tab, a newer failure, and closing the tab invalidate a captured menu action. Policy changes require the explicit command, ready protection, and no affected active navigation. Existing idle same-host tabs reload under the selected exception; unrelated tabs and failed background tabs are not automatically navigated.
+- A document-blocked redirect can emit WebKitErrorDomain/104 with the original token/URL, without a redirect callback. The current public API does not identify that action's redirect lineage. The implementation retains protection, yields to callbacks, and settles only the immediate unbound approved successor when WebKit is idle and the generation/URL still match. It presents the final approved destination for an explicit choice. A committed predecessor, unknown token, newer programmatic request, bound replacement, or still-loading WebView rejects this path. This is guarded recovery presentation, not a claim of private redirect-token access.
+- The startup wrapper still requires a visible window. Its installation body is shared with hidden fixtures, allowing tests to use actual controller/WebKit behavior without desktop activation.
+
+### Verification scope
+
+Six hidden runtime cases exercise first-document blocking and successful recovery, previous-host preservation, actual same-host background reload, cross-host HTTP redirect recovery, stale menu/blocked-failure rejection, selected-tab changes, affected active-tab gating, and excluded error kinds. Two new state-machine cases cover the blocked-successor settlement guards. Fixtures use isolated rule stores/defaults and random test-profile identifiers; no production app or live user data is involved.
+
+The initial hidden fixture setup encountered the production visible-window startup guard; factoring installation resolved this without relaxing normal startup ordering. The first redirect test reproduced the missing callback/original-URL behavior described above. Those failing runs are superseded by the final verification listed below.
+
+| Final check | Result | Evidence |
+| --- | --- | --- |
+| `./scripts/run-tests.sh` | **167 tests, zero failures**; XCTest 8.744 seconds | `.build/TestResults.xL6o4J/Browser.xcresult`, adjacent `xcodebuild.log` |
+| `./scripts/run-tests.sh --release` | **167 tests, zero failures**; XCTest 8.798 seconds | `.build/TestResults.4y22tr/Browser.xcresult`, adjacent `xcodebuild.log` |
+| `make performance-build` | Passed; interactive target compiled without execution; standalone benchmark rebuilt with a fresh output/cache directory | `/private/tmp/browser-g06-performance-build.log`; `.build/BookmarkBenchmark/BookmarkRepositoryBenchmark` |
+| `make bookmark-benchmark` | Passed unchanged 10,000-row load/search budgets on synthetic temporary data | `/private/tmp/browser-g06-bookmark-benchmark.log` |
+| `make verify-release DERIVED_DATA=.build/G05G06ReleaseDerivedData` | Passed production Release build, signature, arm64, sandbox, hardened runtime, and pinned blocker assets | `/private/tmp/browser-g05-g06-production.log`; `.build/G05G06ReleaseDerivedData/Build/Products/Release/Browser.app` |
+| Python fixture syntax, scheme XML, `git diff --check` | Passed | Local static checks |
+
+G06 standalone workload: 10,000 rows / 2,398,938 bytes; load p95 **56.974 ms** over 10 fresh-repository samples against 100 ms; repository search p95 **17.184 ms** and manager filter p95 **16.869 ms**, each over 50 samples against 50 ms. Ran alone among agent workloads, under the existing supervisor's reduced scheduling priority and concurrency limits. No desktop-driving suite ran. These are current standalone measurements on the owner's desktop, not an idle-desktop interactive baseline or a measurement of bookmark mutation/journal performance. Historical July interactive figures remain historical.
+
+G05/G06 were subsequently accepted by the owner, who authorized committing and merging. The checkout was already on `main`, so this slice is integrated directly there. No remote push was requested. No interactive UI/performance suite, production app launch, or live-data operation was performed by the agent.
+
+
+### Owner acceptance and final follow-ups
+
+2026-09-06: the owner said “ok looks good. you can commit and merge.” This accepts the G05/G06 slice for local integration; it does not itemize manual smoke scenarios. All eight original findings are addressed across G01–G06, with automated/runtime evidence and limits retained above.
+
+No application implementation remains in the six-group audit plan. Remaining verification follow-ups are the explicitly opt-in interactive UI/performance suites (including controlled desktop timing) and the historical manual bookmark backup/recovery/reset exercise, whose specific acceptance has not been recorded. Deferred product features remain outside this remediation scope.

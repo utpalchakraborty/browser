@@ -4,22 +4,35 @@ Last updated: 2026-09-06
 
 ## Current audit remediation checkpoint
 
-- G01/G02 were smoke-tested by the owner and committed locally on `main` as
-  `76f7c28` (not pushed).
-- G03/G04 are implemented and owner-smoke-accepted, with local commit authorized:
-  transactional bookmark rollback,
-  corrupt-input deduplication, and Close routing by active window ownership.
-- Final background DebugTesting and ReleaseTesting each passed **159 tests,
-  zero failures**. Production Release package verification passed. New interactive
-  UI acceptance cases and the standalone bookmark benchmark compile; their
-  workloads were not run. The owner reported successful G03/G04 smoke testing;
-  individual manual scenarios were not itemized, and full interactive automation
-  remains deferred.
-- G05 remains proposed. G06's compiler dependency is fixed through G02, with its
-  benchmark workload/timing acceptance still deferred.
-- Start with the current [audit and evidence](codebase-review-2026-09-06.md) and
-  [G03/G04 design](g03-g04-bookmark-transactions-and-close-design.md). Routine
-  `make test`/`make check` use the background path; desktop-driving gates are explicit.
+- G01/G02 and G03/G04 were owner-smoke-accepted and committed locally on
+  `main` as `76f7c28` and `8350f3d` (not pushed).
+- G05 is implemented: Privacy offers an exact-host failed-page exception/retry,
+  including first-document blocks and blocked redirects. Captured actions are
+  invalidated by replacement attempts/tab changes; affected active tabs block
+  the action, and idle same-host tabs synchronize by reloading.
+- Final isolated DebugTesting and ReleaseTesting each passed **167 tests,
+  zero failures**, including six hidden AppKit/WebKit recovery cases and two
+  additional navigation-state guards. Production Release package verification
+  passed at `.build/G05G06ReleaseDerivedData/Build/Products/Release/Browser.app`.
+  The owner accepted G05/G06 and authorized committing to local `main` on
+  2026-09-06; specific manual smoke scenarios were not reported.
+- G06 is complete for its supported build path and standalone workload.
+  `make performance-build` passed from a fresh bookmark output/cache directory.
+  The 10,000-bookmark benchmark passed: load p95 **56.974 ms** (<100 ms),
+  repository search **17.184 ms** and manager filter **16.869 ms** (<50 ms).
+  Interactive performance baselines were not refreshed.
+- G01–G06 application remediation is complete and owner accepted. G05/G06
+  is integrated directly on local `main`; no remote push was requested.
+  No production app launch, live-data smoke, or desktop-driving automation
+  was performed by the agent in this continuation.
+- Remaining verification follow-ups: full interactive UI/performance suites
+  in a desktop-available session, and the historical manual bookmark
+  backup/recovery/reset exercise. General acceptance does not establish that
+  these specific scenarios were exercised.
+- Start with the [current audit and evidence](codebase-review-2026-09-06.md)
+  and [G05/G06 design](g05-g06-failed-document-recovery-design.md).
+  Routine `make test`/`make check` use the background path; desktop-driving gates
+  remain explicit.
 
 ## Historical July restart snapshot
 

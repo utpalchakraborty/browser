@@ -171,6 +171,38 @@ final class ContentBlockingNavigationStateTests: XCTestCase {
         XCTAssertEqual(state.resolveSameDocumentAction(), .none)
     }
 
+    func testBlockedRedirectSettlementRequiresImmediateUnboundApprovedSuccessor() {
+        var state = ContentBlockingNavigationState<Int>()
+        _ = state.beginRequest()
+        _ = state.bind(1)
+        _ = state.approveAction()
+        XCTAssertFalse(state.canSettleUnboundAction(after: 1))
+        _ = state.approveAction()
+        XCTAssertTrue(state.canSettleUnboundAction(after: 1))
+        XCTAssertFalse(state.canSettleUnboundAction(after: 99))
+        _ = state.bind(2)
+        XCTAssertFalse(state.hasUnboundApprovedAction)
+        XCTAssertFalse(state.canSettleUnboundAction(after: 1))
+        XCTAssertEqual(state.fail(1), .stale)
+        XCTAssertTrue(state.hasActiveNavigation)
+    }
+
+    func testBlockedRedirectSettlementRejectsProgrammaticAndOlderAttempts() {
+        var state = ContentBlockingNavigationState<Int>()
+        _ = state.beginRequest()
+        _ = state.bind(1)
+        _ = state.approveAction()
+        _ = state.beginRequest()
+        XCTAssertFalse(state.canSettleUnboundAction(after: 1))
+        _ = state.approveAction()
+        _ = state.approveAction()
+        XCTAssertFalse(state.canSettleUnboundAction(after: 1))
+        _ = state.bind(2)
+        _ = state.commit(2)
+        _ = state.approveAction()
+        XCTAssertFalse(state.canSettleUnboundAction(after: 2))
+    }
+
     func testUnboundCurrentFailureRestoresExactCommittedPolicy() {
         var state = ContentBlockingNavigationState<Int>()
 

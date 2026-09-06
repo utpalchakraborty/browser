@@ -8,6 +8,11 @@ nonisolated struct BrowserTabErrorState: Equatable, Sendable {
     let recoveryActionTitle: String?
 }
 
+nonisolated struct FailedDocumentRecovery: Equatable, Sendable {
+    let id = UUID()
+    let url: URL
+}
+
 nonisolated struct BrowserTabPresentation: Equatable, Sendable {
     let id: UUID
     let title: String
@@ -26,6 +31,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
     private(set) var observedCanGoBack = false
     private(set) var observedCanGoForward = false
     private(set) var errorState: BrowserTabErrorState?
+    private(set) var failedDocumentRecovery: FailedDocumentRecovery?
 
     private(set) var pendingNavigationURL: URL?
     private(set) var retryURL: URL?
@@ -44,6 +50,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
         ContentBlockingNavigationState<WKNavigation>()
     private var localFileAuthorizations: [LocalFileAuthorization] = []
     private var approvedLocalFileURL: URL?
+    private var navigationActionGeneration: UInt64 = 0
 
     private var firstBlankNavigation: WKNavigation?
     private var firstBlankNavigationState: OSSignpostIntervalState?
@@ -297,6 +304,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
         message: String,
         recoveryActionTitle: String?
     ) {
+        failedDocumentRecovery = nil
         errorState = BrowserTabErrorState(
             title: title,
             message: message,
@@ -308,6 +316,20 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func clearRetryURL() {
         retryURL = nil
+    }
+
+    func retryFailedDocument(_ recovery: FailedDocumentRecovery) -> Bool {
+        guard
+            !isClosed,
+            failedDocumentRecovery == recovery,
+            !hasActiveNavigation,
+            webView != nil,
+            ContentBlockerSite(url: recovery.url) != nil,
+            applyContentBlockingPolicy(for: recovery.url, mode: .exact)
+        else {
+            return false
+        }
+        return navigate(to: recovery.url)
     }
 
     func applyExactPolicyAndReload() -> Bool {
@@ -392,6 +414,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
         retryURL = nil
         committedURL = nil
         currentDocumentURL = nil
+        failedDocumentRecovery = nil
         errorState = nil
         contentBlockingNavigationState =
             ContentBlockingNavigationState<WKNavigation>()
@@ -503,6 +526,8 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
                     presentContentBlockingUnavailable()
                     return
                 }
+                navigationActionGeneration &+= 1
+                hideError()
                 _ = contentBlockingNavigationState.approveAction()
                 retryURL = navigationAction.request.url
             }
@@ -598,6 +623,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
         guard acceptsDelegateCallback(from: webView) else {
             return
         }
+        failedDocumentRecovery = nil
         committedURL = webView.url
         currentDocumentURL = webView.url
         if LocalFileAccessPolicy.refersToSameFile(
@@ -647,7 +673,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
         guard acceptsDelegateCallback(from: webView) else {
             return
         }
-        handleNavigationFailure(navigation: navigation, error: error)
+        handleNavigationFailure(navigation: navigation, error: error, isProvisional: false)
     }
 
     func webView(
@@ -658,7 +684,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
         guard acceptsDelegateCallback(from: webView) else {
             return
         }
-        handleNavigationFailure(navigation: navigation, error: error)
+        handleNavigationFailure(navigation: navigation, error: error, isProvisional: true)
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
@@ -962,6 +988,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     private func beginContentBlockingNavigationRequest() {
+        navigationActionGeneration &+= 1
         _ = contentBlockingNavigationState.beginRequest()
     }
 
@@ -984,10 +1011,24 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     private func handleNavigationFailure(
         navigation: WKNavigation?,
-        error: any Error
+        error: any Error,
+        isProvisional: Bool
     ) {
+        // A document rule can block a redirect before WebKit sends its
+        // redirect callback. Its error then carries the original navigation
+        // token and URL, while the final approved action is still unbound.
+        // Keep protection intact and resolve only after WebKit becomes idle.
+        let canSettleBlockedAction = isProvisional
+            && (error as NSError).domain == "WebKitErrorDomain"
+            && (error as NSError).code == 104
+            && navigation.map {
+                contentBlockingNavigationState.canSettleUnboundAction(after: $0)
+            } == true
         let disposition = contentBlockingNavigationState.fail(navigation)
         guard case let .current(mode) = disposition else {
+            if canSettleBlockedAction, let destination = retryURL {
+                settleBlockedAction(destination: destination, error: error)
+            }
             finishFirstNavigationIfNeeded(navigation, accessibilityValue: nil)
             finishSubmittedNavigationIfNeeded(navigation, accessibilityValue: nil)
             return
@@ -996,12 +1037,45 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
         synchronizeObservedState()
         finishFirstNavigationIfNeeded(navigation, accessibilityValue: "Failed")
         finishSubmittedNavigationIfNeeded(navigation, accessibilityValue: "Failed")
-        show(
-            BrowserErrorPresentation.from(
-                error: error,
-                attemptedURL: retryURL ?? webView?.url
-            )
+        let nsError = error as NSError
+        let failingURL = (nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL)
+            ?? retryURL
+        let presentation = BrowserErrorPresentation.from(
+            error: error,
+            attemptedURL: failingURL ?? webView?.url
         )
+        show(presentation)
+        if isProvisional, mode == .exact,
+           let presentation, presentation.kind != .tlsFailure,
+           let failingURL, ContentBlockerSite(url: failingURL) != nil
+        {
+            retryURL = failingURL
+            failedDocumentRecovery = FailedDocumentRecovery(url: failingURL)
+            notifyStateChange()
+        }
+    }
+
+    private func settleBlockedAction(destination: URL, error: any Error) {
+        let generation = navigationActionGeneration
+        Task { @MainActor [weak self] in
+            // Let queued navigation-start and loading-state callbacks run.
+            await Task.yield()
+            guard let self, !isClosed,
+                  navigationActionGeneration == generation,
+                  webView?.isLoading == false,
+                  contentBlockingNavigationState.hasUnboundApprovedAction,
+                  retryURL == destination,
+                  ContentBlockerSite(url: destination) != nil
+            else {
+                return
+            }
+            applyContentBlockingPolicyForCommittedPage(
+                mode: contentBlockingNavigationState.cancelLatest()
+            )
+            show(BrowserErrorPresentation.from(error: error, attemptedURL: destination))
+            failedDocumentRecovery = FailedDocumentRecovery(url: destination)
+            notifyStateChange()
+        }
     }
 
     private func finishFirstNavigationIfNeeded(
@@ -1148,6 +1222,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
         guard errorState != nil else {
             return
         }
+        failedDocumentRecovery = nil
         errorState = nil
         notifyStateChange()
     }

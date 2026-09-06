@@ -152,6 +152,12 @@ class FixtureHandler(BaseHTTPRequestHandler):
                 '<body><main id="page-b">Phase 2 Page B</main>'
                 '<a href="/phase2/page-a">Go to Page A</a></body>'
             )
+        elif path == "/g05/redirect":
+            self.send_bytes(
+                b"",
+                status=302,
+                extra_headers=[("Location", "http://127.0.0.1:18765/normal/")],
+            )
         elif path == "/phase2/redirect":
             self.send_bytes(
                 b"",

@@ -146,7 +146,20 @@ final class BrowserWindowController: NSWindowController,
         viewCount: Int,
         initialURL: URL
     ) {
-        guard self.profile == nil, window?.isVisible == true else {
+        guard window?.isVisible == true else {
+            return
+        }
+        installWebViews(profile: profile, viewCount: viewCount, initialURL: initialURL)
+    }
+
+    // Keep production's visible-window startup ordering in startWebViews,
+    // while allowing the same installation path in hidden runtime fixtures.
+    func installWebViews(
+        profile: BrowserProfile,
+        viewCount: Int,
+        initialURL: URL
+    ) {
+        guard self.profile == nil else {
             return
         }
         self.profile = profile
@@ -639,11 +652,18 @@ final class BrowserWindowController: NSWindowController,
     @objc
     func toggleContentBlockingForCurrentSiteAndReload(_ sender: Any?) {
         let tab = tabManager.selectedTab
+        let recovery = tab.failedDocumentRecovery
+        if let menuItem = sender as? NSMenuItem,
+           (menuItem.representedObject as? FailedDocumentRecovery) != recovery
+        {
+            return
+        }
         guard
             let contentBlockingCoordinator,
+            contentBlockingCoordinator.isReady,
             tab.webView != nil,
             !tab.hasActiveNavigation,
-            let url = tab.committedURL,
+            let url = recovery?.url ?? tab.committedURL,
             let site = ContentBlockerSite(url: url)
         else {
             NSSound.beep()
@@ -657,6 +677,9 @@ final class BrowserWindowController: NSWindowController,
             NSSound.beep()
             return
         }
+        guard recovery == nil || !contentBlockingCoordinator.snapshot(for: url).isException else {
+            return
+        }
         guard contentBlockingCoordinator.toggleException(for: url) != nil else {
             NSSound.beep()
             return
@@ -665,7 +688,9 @@ final class BrowserWindowController: NSWindowController,
         // navigation preparation. Apply the selected exact-host policy before
         // reloading so an exception can recover even when a production rule
         // blocks the main document itself.
-        guard tab.applyExactPolicyAndReload() else {
+        let didStart = recovery.map { tab.retryFailedDocument($0) }
+            ?? tab.applyExactPolicyAndReload()
+        guard didStart else {
             _ = contentBlockingCoordinator.toggleException(for: url)
             _ = tab.restoreExactPolicyForCommittedPage()
             NSSound.beep()
@@ -745,6 +770,7 @@ final class BrowserWindowController: NSWindowController,
         case #selector(toggleContentBlockingForCurrentSiteAndReload(_:)):
             let presentation = contentBlockingTogglePresentation
             menuItem.title = presentation.title
+            menuItem.representedObject = tabManager.selectedTab.failedDocumentRecovery
             return presentation.isEnabled
         case #selector(selectSearchProvider(_:)):
             menuItem.state = (menuItem.representedObject as? String)
@@ -974,8 +1000,10 @@ final class BrowserWindowController: NSWindowController,
         guard let contentBlockingCoordinator else {
             return ("Blocking Is Unavailable", false)
         }
+        let tab = tabManager.selectedTab
+        let recovery = tab.failedDocumentRecovery
         let snapshot = contentBlockingCoordinator.snapshot(
-            for: currentContentBlockingURL
+            for: recovery?.url ?? currentContentBlockingURL
         )
         switch snapshot.availability {
         case .preparing:
@@ -985,11 +1013,24 @@ final class BrowserWindowController: NSWindowController,
         case .active, .activeLastValidRules:
             guard
                 let site = snapshot.site,
-                tabManager.selectedTab.committedURL != nil,
-                tabManager.selectedTab.webView != nil,
-                !tabManager.selectedTab.hasActiveNavigation
+                recovery != nil || tab.committedURL != nil,
+                tab.webView != nil,
+                !tab.hasActiveNavigation
             else {
                 return ("No Website Selected", false)
+            }
+            let hasAffectedActiveTab = tabManager.tabs.contains {
+                $0.hasActiveNavigation
+                    && contentBlockingURL(in: $0, matching: site) != nil
+            }
+            if recovery != nil {
+                return (
+                    "Disable Blocking for \(site.host) and Retry Failed Page",
+                    !snapshot.isException && !hasAffectedActiveTab
+                )
+            }
+            if hasAffectedActiveTab {
+                return ("Wait for \(site.host) Navigation to Finish", false)
             }
             let verb = snapshot.isException ? "Enable" : "Disable"
             return ("\(verb) Blocking for \(site.host) and Reload", true)

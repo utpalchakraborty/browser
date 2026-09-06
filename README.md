@@ -157,7 +157,11 @@ scripts, styles, and sibling pages can load.
 - Privacy shows whether ad and tracker blocking is active for the current site.
 - Option-Command-P disables or enables blocking for the current exact host and
   reloads the page. The choice persists across relaunch and does not apply to
-  subdomains or alternate hostnames.
+  subdomains or alternate hostnames. If a main page fails to load, Privacy can
+  instead offer **Disable Blocking for <host> and Retry Failed Page**, naming
+  the failed destination even in a new tab. This is an explicit persistent
+  exception; it does not bypass certificate errors. Affected tabs must finish
+  navigating before the command is available.
 - Navigate > Search Provider selects DuckDuckGo, Google, or Bing.
 
 On a first install or after the bundled rules change, Browser compiles the
