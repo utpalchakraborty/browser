@@ -29,6 +29,6 @@ With this installed Xcode, disabling automatic parallel WMO alone omitted the th
 
 ## Implemented outcome
 
-Implemented and verified for background use. Fresh DebugTesting and ReleaseTesting each pass 147 tests; four runner tests pass; build-only UI/performance and standalone benchmark compilation pass; production Release verification passes. Passive monitoring recorded 766 samples without a foreground change. Detailed artifacts, intermediate toolchain-check supersession, and deferred interactive gates are recorded in [the audit](codebase-review-2026-09-06.md#g01g02-remediation--2026-09-06-current-checkpoint). Changes remain uncommitted.
+Implemented and verified for background use. Fresh DebugTesting and ReleaseTesting each pass 147 tests; four runner tests pass; build-only UI/performance and standalone benchmark compilation pass; production Release verification passes. Passive monitoring recorded 766 samples without a foreground change. Detailed artifacts, intermediate toolchain-check supersession, and deferred interactive gates are recorded in [the audit](codebase-review-2026-09-06.md#g01g02-remediation--2026-09-06-current-checkpoint). Subsequently committed on local main as `76f7c28` after owner smoke acceptance.
 
 Owner acceptance (2026-09-06): user reported successful smoke testing and authorized committing this slice before G03/G04.

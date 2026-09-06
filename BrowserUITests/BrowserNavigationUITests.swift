@@ -8,6 +8,48 @@ final class BrowserNavigationUITests: XCTestCase {
 
     private var application: XCUIApplication!
 
+    func testCommandWClosesAuxiliaryWindowsAndKeepsBrowsingState() {
+        launchApplication()
+        defer { application.terminate() }
+        navigate(to: "/phase2/page-a")
+        XCTAssertTrue(pageText("Phase 2 Page A").waitForExistence(timeout: 5))
+        application.typeKey("t", modifierFlags: .command)
+        waitForTabCount(2)
+        navigate(to: "/phase2/page-b")
+        XCTAssertTrue(pageText("Phase 2 Page B").waitForExistence(timeout: 5))
+        showBookmarks()
+        bookmarkSearchField.click()
+        application.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(application.windows["BrowserBookmarksWindow"].waitForNonExistence(timeout: 3))
+        waitForTabCount(2)
+        waitForAddress(fixtureURL("/phase2/page-b"))
+        showPrivacy()
+        application.searchFields["BrowserPrivacySearchField"].click()
+        application.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(application.windows["BrowserPrivacyWindow"].waitForNonExistence(timeout: 3))
+        waitForTabCount(2)
+        waitForAddress(fixtureURL("/phase2/page-b"))
+        application.typeKey("l", modifierFlags: .command)
+        application.typeKey("w", modifierFlags: .command)
+        waitForTabCount(1)
+        XCTAssertTrue(pageText("Phase 2 Page A").waitForExistence(timeout: 5))
+    }
+
+    func testCommandWDoesNotDismissBookmarkEditorOrCloseItsTab() {
+        launchApplication()
+        defer { application.terminate() }
+        navigate(to: "/phase2/page-a")
+        XCTAssertTrue(pageText("Phase 2 Page A").waitForExistence(timeout: 5))
+        application.typeKey("d", modifierFlags: .command)
+        XCTAssertTrue(bookmarkEditor.waitForExistence(timeout: 3))
+        application.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(bookmarkEditor.exists)
+        waitForTabCount(1)
+        application.buttons["BrowserBookmarkCancelButton"].click()
+        XCTAssertTrue(bookmarkEditor.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(pageText("Phase 2 Page A").exists)
+    }
+
     func testLaunchFocusAndAddressSubmission() throws {
         launchApplication()
         defer { application.terminate() }

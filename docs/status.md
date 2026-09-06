@@ -1,8 +1,27 @@
 # Project Status
 
-Last updated: 2026-07-30
+Last updated: 2026-09-06
 
-## Restart snapshot
+## Current audit remediation checkpoint
+
+- G01/G02 were smoke-tested by the owner and committed locally on `main` as
+  `76f7c28` (not pushed).
+- G03/G04 are implemented and owner-smoke-accepted, with local commit authorized:
+  transactional bookmark rollback,
+  corrupt-input deduplication, and Close routing by active window ownership.
+- Final background DebugTesting and ReleaseTesting each passed **159 tests,
+  zero failures**. Production Release package verification passed. New interactive
+  UI acceptance cases and the standalone bookmark benchmark compile; their
+  workloads were not run. The owner reported successful G03/G04 smoke testing;
+  individual manual scenarios were not itemized, and full interactive automation
+  remains deferred.
+- G05 remains proposed. G06's compiler dependency is fixed through G02, with its
+  benchmark workload/timing acceptance still deferred.
+- Start with the current [audit and evidence](codebase-review-2026-09-06.md) and
+  [G03/G04 design](g03-g04-bookmark-transactions-and-close-design.md). Routine
+  `make test`/`make check` use the background path; desktop-driving gates are explicit.
+
+## Historical July restart snapshot
 
 - Phase 4 is fully complete. The native privacy window inspects and deletes
   WebKit website data and exposes visible reset-all actions for blocker

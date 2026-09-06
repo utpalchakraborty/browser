@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dataStoreIdentifier: launchConfiguration.dataStoreIdentifier
     )
     private var browserWindowController: BrowserWindowController?
+    private var closeCommand: BrowserCloseCommand?
     private var contentBlockingCoordinator: ContentBlockingCoordinator?
 #if DEBUG
     private var profilePersistenceProbe: ProfilePersistenceProbe?
@@ -404,12 +405,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             keyEquivalent: "t"
         )
         newTabItem.target = navigationTarget
-        let closeTabItem = fileMenu.addItem(
-            withTitle: "Close Tab",
-            action: #selector(BrowserWindowController.closeSelectedTab(_:)),
-            keyEquivalent: "w"
-        )
-        closeTabItem.target = navigationTarget
+        let closeCommand = BrowserCloseCommand(browser: navigationTarget)
+        self.closeCommand = closeCommand
+        fileMenu.addItem(closeCommand.makeMenuItem())
         fileMenu.addItem(.separator())
         let closeWindowItem = fileMenu.addItem(
             withTitle: "Close Window",

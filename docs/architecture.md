@@ -290,12 +290,19 @@ file containing stable identifiers, canonical HTTP/HTTPS URLs or absolute local
 `.html`/`.htm` file URLs, titles, and creation/update timestamps.
 
 - Reads and writes do not run on the main actor.
-- Writes use atomic replacement.
+- Writes use atomic replacement plus one undo journal,
+  `Bookmarks.transaction.json`, containing prior primary/backup bytes or absence.
+  Both active updates precede journal removal (the commit point); in-memory state
+  changes only afterward. Failed operations roll back. Pending rollback is resolved
+  before loading either active file; unreadable journals fail closed. Reset and
+  backup restore use the same protocol. This assumes the existing single repository
+  actor and does not add cross-process writer coordination or power-loss guarantees.
 - Every successful mutation writes the latest validated snapshot to both
   `Bookmarks.backup.json` and the primary. This keeps recovery current and
   ensures an edited or deleted URL does not remain in the active backup.
-- A malformed primary is copied to a uniquely named `Bookmarks.corrupt.*.json`
-  file. A valid backup is shown read-only until the user explicitly restores it
+- Each distinct malformed primary is preserved once under `Bookmarks.corrupt.*.json`,
+  using a verified SHA-256 name or a matching legacy copy. Existing artifacts are
+  never overwritten. A valid backup is shown read-only until the user explicitly restores it
   or resets the library; unrecoverable data remains a visible error.
 - BookmarkCoordinator supplies immutable snapshots to the main-actor browser
   toolbar, editor sheet, and searchable nonmodal manager.
@@ -307,12 +314,18 @@ file containing stable identifiers, canonical HTTP/HTTPS URLs or absolute local
   consent panel used by address submission. The grant is never persisted.
 
 Phase 3 deliberately has no persistent bookmarks bar and no folder hierarchy.
+Command-W resolves the key window at dispatch and validation time: the main
+browser closes its selected tab, auxiliary windows use native `performClose`,
+and attached/key sheets disable Close. It never falls back to a background
+browser. Shift-Command-W and title-bar window closure retain their native behavior.
+
 The searchable manager and keyboard commands keep the browsing surface compact;
 folders can be added later without changing the repository boundary if a real
 flat-library organization problem emerges.
 
 Production files live in the sandbox's Application Support directory under
-`com.utpalchakraborty.browser`. UI tests use an isolated `UITests` subdirectory.
+`com.utpalchakraborty.browser`. UI tests use `UITests` beneath the separate
+`com.utpalchakraborty.browser.testhost` namespace and test app container.
 Performance launches construct no repository and therefore touch no bookmark
 store.
 
@@ -418,7 +431,7 @@ request.
 
 | Data | Owner | Purpose | User deletion |
 | --- | --- | --- | --- |
-| Bookmarks | BookmarkRepository | Explicitly saved pages | Delete individually; reset active files; remove active and preserved corrupt files while Browser is quit for complete erasure |
+| Bookmarks | BookmarkRepository | Explicitly saved pages | Delete individually; reset active files; remove active files, any transaction journal, and preserved corrupt files while Browser is quit for complete erasure |
 | Required preferences | UserDefaults | Search provider | Reset settings |
 | Main window frame | UserDefaults through AppKit frame autosave | Reopen at the last usable size and location | Reset settings |
 | Last-valid blocker identifiers | ContentBlockerStateStore in UserDefaults | Transactional recovery bookkeeping; contains no navigated URL | Privacy > Manage Website Data > Delete Compiled Blocking Rules |

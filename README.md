@@ -237,14 +237,20 @@ Bookmarks are versioned JSON stored locally in the app's sandbox at:
 ~~~
 
 `Bookmarks.json` is the primary file and `Bookmarks.backup.json` is the last
-valid backup. Quit Browser before copying both files to export or back them up.
-To reset the active library, quit Browser and remove those two files;
-alternatively, use Restore Backup or Reset Bookmarks if Browser presents a
-recovery state. A malformed primary is preserved as
-`Bookmarks.corrupt.<identifier>.json` rather than silently overwritten, and the
-in-app recovery reset deliberately keeps those preserved copies. For complete
-bookmark erasure, quit Browser and also delete every preserved
-`Bookmarks.corrupt.*.json` file from this directory.
+valid backup. Changes, backup restoration, and reset use a temporary
+`Bookmarks.transaction.json` rollback journal. A failed operation restores the
+previous library; an interrupted rollback is completed before either active
+copy is read on the next attempt. Successful operations remove the journal.
+
+Quit Browser before copying bookmark data. Export both active files **and the
+journal if present**; do not discard a pending journal on its own. To reset the
+active library, use the in-app recovery Reset Bookmarks action, or quit Browser
+and intentionally remove both active files and the transaction journal together.
+A malformed primary is preserved as `Bookmarks.corrupt.<identifier>.json` rather
+than silently overwritten. Identical corrupt input reuses its existing preserved
+copy, and in-app reset keeps these preserved originals. For complete bookmark
+erasure, quit Browser and remove the two active files, any transaction journal,
+and every `Bookmarks.corrupt.*.json` file from this directory.
 
 Bookmarks are the only application-owned URLs written by this feature. They may
 include an explicitly saved local HTML path, but never its filesystem grant.

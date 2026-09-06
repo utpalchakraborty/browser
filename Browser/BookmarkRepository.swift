@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 nonisolated enum BookmarkRecoveryReason: Equatable, Sendable {
     case corruptPrimary
@@ -26,6 +27,7 @@ nonisolated enum BookmarkRepositoryError: Error, Equatable, Sendable {
     case duplicateURL(existingID: UUID)
     case recoveryRequired
     case noRecoveryAvailable
+    case transactionRecoveryRequired(journalURL: URL)
     case unrecoverableData(
         primaryFileURL: URL,
         preservedPrimaryFileURL: URL?,
@@ -44,6 +46,8 @@ extension BookmarkRepositoryError: LocalizedError {
             "Restore or reset the recovered bookmarks before making changes."
         case .noRecoveryAvailable:
             "There is no bookmark backup waiting to be restored."
+        case .transactionRecoveryRequired:
+            "Bookmark storage recovery could not finish. No change was committed. Retry when storage is available; the recovery journal has been retained."
         case .unrecoverableData:
             "The bookmark file cannot be read and no valid backup is available."
         }
@@ -71,6 +75,7 @@ actor BookmarkRepository {
 
     nonisolated static let primaryFileName = "Bookmarks.json"
     nonisolated static let backupFileName = "Bookmarks.backup.json"
+    nonisolated static let transactionFileName = "Bookmarks.transaction.json"
 
     private let directoryURL: URL
     private let fileManager: FileManager
@@ -89,6 +94,7 @@ actor BookmarkRepository {
     }
 
     func load() throws -> BookmarkRepositorySnapshot {
+        try reconcilePendingTransaction()
         if let loadedFile {
             return BookmarkRepositorySnapshot(
                 bookmarks: loadedFile.bookmarks,
@@ -201,20 +207,25 @@ actor BookmarkRepository {
 
         let backupData = try Data(contentsOf: backupFileURL)
         let backup = try decodeAndValidate(backupData)
-        try createStorageDirectory()
-        try atomicWriter.write(backupData, to: primaryFileURL)
+        try replaceActiveFiles(primary: backupData, backup: backupData)
         loadedFile = backup
         loadRecovery = nil
         return BookmarkRepositorySnapshot(bookmarks: backup.bookmarks, recovery: nil)
     }
 
     func reset() throws {
-        for url in [primaryFileURL, backupFileURL] where fileExists(at: url) {
-            try fileManager.removeItem(at: url)
+        try reconcilePendingTransaction()
+        if let primary = try readIfPresent(primaryFileURL),
+           (try? decodeAndValidate(primary)) == nil {
+            _ = try preserveCorruptPrimary()
         }
-
+        try replaceActiveFiles(primary: nil, backup: nil)
         loadedFile = BookmarkFile(bookmarks: [])
         loadRecovery = nil
+    }
+
+    private var transactionFileURL: URL {
+        directoryURL.appendingPathComponent(Self.transactionFileName)
     }
 
     private var primaryFileURL: URL {
@@ -334,19 +345,81 @@ actor BookmarkRepository {
         }
         _ = try decodeAndValidate(encoded)
 
-        // Keep both active copies aligned with the latest explicit user
-        // request. In particular, editing or deleting a bookmark must not
-        // leave its previous URL behind in the recovery file.
-        try atomicWriter.write(encoded, to: backupFileURL)
-        try atomicWriter.write(encoded, to: primaryFileURL)
+        try replaceActiveFiles(primary: encoded, backup: encoded)
+    }
+
+    /// A journal's presence means neither active file is committed yet. Its
+    /// removal is the only commit point; all callers publish memory afterward.
+    private func replaceActiveFiles(primary: Data?, backup: Data?) throws {
+        try reconcilePendingTransaction()
+        try createStorageDirectory()
+        let previous = BookmarkTransaction(
+            schemaVersion: 1,
+            primary: try readIfPresent(primaryFileURL),
+            backup: try readIfPresent(backupFileURL)
+        )
+        do {
+            try atomicWriter.write(try JSONEncoder().encode(previous), to: transactionFileURL)
+            try restoreImage(backup, at: backupFileURL)
+            try restoreImage(primary, at: primaryFileURL)
+            try fileManager.removeItem(at: transactionFileURL)
+        } catch {
+            let operationError = error
+            // Even a writer that reports an error after replacement may have
+            // left the journal in place. Resolve it before exposing the files.
+            try reconcilePendingTransaction()
+            throw operationError
+        }
+    }
+
+    private func reconcilePendingTransaction() throws {
+        guard fileExists(at: transactionFileURL) else { return }
+        do {
+            let previous = try JSONDecoder().decode(
+                BookmarkTransaction.self,
+                from: Data(contentsOf: transactionFileURL)
+            )
+            guard previous.schemaVersion == 1 else {
+                throw BookmarkRepositoryError.transactionRecoveryRequired(journalURL: transactionFileURL)
+            }
+            try restoreImage(previous.backup, at: backupFileURL)
+            try restoreImage(previous.primary, at: primaryFileURL)
+            try fileManager.removeItem(at: transactionFileURL)
+            loadedFile = nil
+            loadRecovery = nil
+        } catch {
+            throw BookmarkRepositoryError.transactionRecoveryRequired(journalURL: transactionFileURL)
+        }
+    }
+
+    private func readIfPresent(_ url: URL) throws -> Data? {
+        fileExists(at: url) ? try Data(contentsOf: url) : nil
+    }
+
+    private func restoreImage(_ data: Data?, at url: URL) throws {
+        guard let data else {
+            if fileExists(at: url) { try fileManager.removeItem(at: url) }
+            return
+        }
+        // Retrying rollback must not rewrite an already restored copy.
+        if try readIfPresent(url) != data { try atomicWriter.write(data, to: url) }
     }
 
     private func preserveCorruptPrimary() throws -> URL {
-        let preservedURL = directoryURL.appendingPathComponent(
-            "Bookmarks.corrupt.\(UUID().uuidString).json",
-            isDirectory: false
-        )
-        try fileManager.copyItem(at: primaryFileURL, to: preservedURL)
+        let data = try Data(contentsOf: primaryFileURL)
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let preferredURL = directoryURL.appendingPathComponent("Bookmarks.corrupt.\(digest).json")
+        if try readIfPresent(preferredURL) == data { return preferredURL }
+        // Honor copies created by older versions as well as hash-named copies.
+        for url in try fileManager.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil)
+            where url.lastPathComponent.hasPrefix("Bookmarks.corrupt.") && url.pathExtension == "json" {
+            if (try? Data(contentsOf: url)) == data { return url }
+        }
+        let preservedURL = fileExists(at: preferredURL)
+            ? directoryURL.appendingPathComponent("Bookmarks.corrupt.\(digest).\(UUID().uuidString).json")
+            : preferredURL
+        // Never overwrite an existing preserved original.
+        try data.write(to: preservedURL, options: .withoutOverwriting)
         return preservedURL
     }
 
@@ -396,4 +469,33 @@ private nonisolated enum BookmarkFileValidationError: Error {
     case unsupportedSchemaVersion(Int)
     case duplicateIdentifier(UUID)
     case duplicateURL(URL)
+}
+
+/// Explicit nulls distinguish a missing file from a damaged/incomplete journal.
+private nonisolated struct BookmarkTransaction: Codable {
+    let schemaVersion: Int
+    let primary: Data?
+    let backup: Data?
+
+    enum CodingKeys: String, CodingKey { case schemaVersion, primary, backup }
+
+    init(schemaVersion: Int, primary: Data?, backup: Data?) {
+        self.schemaVersion = schemaVersion
+        self.primary = primary
+        self.backup = backup
+    }
+
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        primary = try values.decode(Data?.self, forKey: .primary)
+        backup = try values.decode(Data?.self, forKey: .backup)
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(schemaVersion, forKey: .schemaVersion)
+        try values.encode(primary, forKey: .primary)
+        try values.encode(backup, forKey: .backup)
+    }
 }

@@ -1,12 +1,12 @@
 # Browser codebase review — 2026-09-06
 
-Status: G01 and G02 implementation authorized and implemented on 2026-09-06. G01 and G02 passed background verification; interactive acceptance is explicitly deferred. G03–G05 remain proposed; the G02 standalone benchmark split also fixes G06's compiler source dependency, with benchmark execution deferred. The owner reported a successful smoke test and authorized committing G01/G02 and continuing G03/G04. Original finding evidence and audit-only checkpoints are preserved as historical baseline evidence.
+Status: G01/G02 were smoke-tested by the owner and committed locally on `main` as `76f7c28`. G03/G04 are implemented, background verified (159 Debug and 159 Release tests), and owner smoke accepted; the owner authorized their local commit. G05 remains proposed. G06's compiler dependency is fixed and build-verified through G02; benchmark execution remains deferred. Original finding evidence and audit-only checkpoints remain historical baseline evidence.
 
 Audit baseline: branch `main`, commit `ea6528921be27d8d0a3ef9a2c7df955daa2b591c`. The working tree was clean at audit start. Source references describe that baseline. No applicable AGENTS.md was found in the project or ancestor directories.
 
 ## Purpose and method
 
-Requested broad codebase audit using the codebase-audit skill. Review order is core (`BE`), native AppKit presentation (`FE`), then integration/build/verification (`IN`). The initial pass was analysis and report writing only; the owner subsequently authorized G01/G02 implementation.
+Requested broad codebase audit using the codebase-audit skill. Review order is core (`BE`), native AppKit presentation (`FE`), then integration/build/verification (`IN`). The initial pass was analysis and report writing only; the owner subsequently authorized G01/G02, then G03/G04 implementation.
 
 The approved architecture is a personal macOS AppKit/WKWebView browser with a shared persistent WebKit profile, memory-only tabs and navigation, explicit JSON bookmarks, pinned content-blocking rules, exact-host exceptions, consent-bound per-tab local-folder access, and narrowly allowed magnet handoff. Deferred downloads, session restoration, tab rearrangement, and broader browser features are not defects merely because they are absent. Existing status documents contain historical acceptance evidence, not fresh verification of this snapshot.
 
@@ -14,7 +14,7 @@ Evidence labels: Confirmed (source), Confirmed (reproduced), Risk, and Debt. Pri
 
 ## Review map
 
-Eight findings: **3 core, 2 native presentation, 3 integration**. Priority: **1 P1, 6 P2, 1 P3**. Evidence: **4 Confirmed (reproduced), 4 Confirmed (source)**. All are open. This is a completed review pass, not a claim that every defect has been found.
+Eight findings: **3 core, 2 native presentation, 3 integration**. Priority: **1 P1, 6 P2, 1 P3**. Evidence: **4 Confirmed (reproduced), 4 Confirmed (source)**. These counts describe the original audit. G01–G04 are now implemented and owner smoke accepted; G05 remains the outstanding application fix, and G06 retains workload/timing verification only. This is a completed review pass, not a claim that every defect has been found.
 
 | Discussion area | Findings | Why it matters |
 | --- | --- | --- |
@@ -28,14 +28,14 @@ Useful counterevidence: per-tab teardown clears delegates, KVO observers, pendin
 
 ## Grouped plan of attack
 
-The initial plan was proposed only. The owner subsequently authorized G01/G02 implementation; other application groups remain proposed. Implementation authorization did not request a commit or merge.
+The initial plan was proposed only. The owner subsequently authorized G01/G02 and then G03/G04 implementation; G05 remains proposed. The owner subsequently authorized local commits after smoke acceptance of G01/G02 and G03/G04.
 
 | Group | Cohesive outcome | Findings | Prerequisites | Status |
 | --- | --- | --- | --- | --- |
 | G01 | Reject pasted magnet URIs before search | BE-01 | None for core checks; G02 for native acceptance | Implemented; background verified |
 | G02 | Make routine checks safe during ordinary desktop use | IN-02, IN-03 | None | Implemented; background verified; interactive acceptance deferred |
-| G03 | Make bookmark failure and recovery outcomes consistent | BE-02, BE-03 | None for repository checks; G02 for recovery UI acceptance | Proposed |
-| G04 | Make Close act on the active window's content | FE-01 | G02 for keyboard acceptance | Proposed |
+| G03 | Make bookmark failure and recovery outcomes consistent | BE-02, BE-03 | None for repository checks; G02 for recovery UI acceptance | Implemented; background verified; owner smoke accepted |
+| G04 | Make Close act on the active window's content | FE-01 | G02 for keyboard acceptance | Implemented; hidden native menu verified; owner smoke accepted |
 | G05 | Recover an explicitly selected failed document with a site exception | FE-02 | G02 for WebKit/UI acceptance | Proposed |
 | G06 | Restore the supported performance build path | IN-01 | None for compilation; G02 for subsequent interactive gates | Compiler fix/build verified through G02; workload deferred |
 
@@ -69,7 +69,7 @@ Scope: make first-save and later mutation failures agree across memory, primary,
 
 Compatibility: retain schema-1 bookmarks and stable UUIDs, explicit local URLs, and the successful-operation requirement to remove edited/deleted URLs from both active copies. Preserve existing corrupt files; any new recovery bookkeeping must have a bounded, documented rollback path. Two independent atomic file writes do not by themselves provide an atomic user operation.
 
-Decision needed: after one durable copy changes but the other fails, should the API report a committed operation with degraded redundancy, or an operation rolled back to the previous committed state? Specify and test the outcome before choosing the write protocol.
+Decision resolved during implementation: use rollback semantics and a prior-image journal, with journal removal as the commit point. A thrown operation has not committed; unresolved rollback blocks subsequent repository reads/mutations until storage recovers. See the G03/G04 design and evidence below.
 
 Acceptance: first add, later add, edit, delete, reset, and restore with failure at each durable step; fresh process and in-memory views agree with the reported outcome. Three launches over unchanged corruption preserve one new copy, and distinct corruption remains separately recoverable. Finish the historically pending manual bookmark-recovery exercise using isolated data.
 
@@ -109,7 +109,7 @@ Verify: all three providers must return an unsupported-address result for pasted
 
 ### BE-02 — Failed bookmark writes leave a different recoverable library (P2, Confirmed (reproduced))
 
-Status: Open.
+Status: Implemented in G03/G04 on 2026-09-06; background checks passed. See current remediation evidence and remaining manual/visible acceptance below.
 
 Evidence: `Browser/BookmarkRepository.swift:327–341` writes the new backup before the primary; successful mutations update cached state only after both writes (`:135–139,169–175,186–192`). `:256–266` recovers a backup when primary is absent; `Browser/BookmarkCoordinator.swift:168–174` reports a thrown write as an operation error without reconciling disk state. `BrowserTests/BookmarkRepositoryTests.swift:288–316` injects a later primary-write failure but checks only the old primary on reopen, not the changed backup or a failed first save.
 
@@ -121,7 +121,7 @@ Verify: inject failure at each write on first add, later add, edit, and delete; 
 
 ### BE-03 — Every unresolved corrupt-file launch creates another full preserved copy (P3, Confirmed (reproduced))
 
-Status: Open.
+Status: Implemented in G03/G04 on 2026-09-06; background checks passed. See current remediation evidence and remaining manual/visible acceptance below.
 
 Evidence: `Browser/BookmarkRepository.swift:247–252,282–288,344–351` copies the unchanged corrupt primary to a fresh UUID filename on every fresh repository load, leaving the primary intact. `reset` (`:211–218`) intentionally retains preserved input. Startup automatically loads the library (`Browser/AppDelegate.swift:84–103`).
 
@@ -135,7 +135,7 @@ Verify: repeated launches over unchanged corruption produce one preserved copy; 
 
 ### FE-01 — Command-W in auxiliary windows closes a browsing tab (P2, Confirmed (source))
 
-Status: Open.
+Status: Implemented in G03/G04 on 2026-09-06; background checks passed. See current remediation evidence and remaining manual/visible acceptance below.
 
 Evidence: `Browser/AppDelegate.swift:440–445` gives Command-W an explicit target of the main `BrowserWindowController`. Its `closeSelectedTab` (`Browser/BrowserWindowController.swift:303–306,328–357`) removes the selected browsing tab without checking the key window; menu validation (`:712–754`) has no close-action guard and defaults to enabled. Both Bookmarks and Privacy are nonmodal key windows (`Browser/BookmarkManagerWindowController.swift:106–111`, `Browser/WebsiteDataPrivacyWindowController.swift:124–132`). The alternate Shift-Command-W command targets `NSWindow.performClose` through the responder chain (`Browser/AppDelegate.swift:447–452`).
 
@@ -312,7 +312,7 @@ Task-authored repository changes are confined to this report. No application/con
 
 ## G01/G02 remediation — 2026-09-06 (current checkpoint)
 
-Authorization: owner asked to start fixing G01 and G02. Design: [G01–G02 test isolation design](g01-g02-test-isolation-design.md). Changes remain uncommitted on `main`; G03–G05 application fixes were not included.
+Authorization: owner asked to start fixing G01 and G02. Design: [G01–G02 test isolation design](g01-g02-test-isolation-design.md). This slice was subsequently owner-smoke-accepted and committed as `76f7c28` on `main`; G03–G05 application fixes were not included in that commit.
 
 - G01 explicitly rejects `magnet:` input before search fallback. Tests cover all three providers, mixed case, whitespace, query-rich URIs, Return and Command-Return interpretation, and the actual hidden controller submission action: displayed Unsupported Address, no queued navigation, no WebView, no external opener. Ordinary submission still queues a URL; existing pointer handoff/host:port/colon-prose regressions remain selected.
 - G02 centralizes launch/storage policy in `BrowserLaunchConfiguration`. DebugTesting/ReleaseTesting use `com.utpalchakraborty.browser.testhost`; background startup prohibits activation before the run loop and returns without building the normal app window or services. Preferences, bookmarks, WebKit profiles, geometry, and compiled rules are isolated. Production Debug/Release identity and launch policy are retained.
@@ -344,9 +344,51 @@ The first attempt to disable automatic WMO threading exposed a toolchain object-
 
 Limits: no interactive suite, benchmark workload, production app launch, external handler, or user-data migration/reset ran during remediation. UI/performance test app identity is verified by build configuration and generated test metadata, with foreground behavior still pending an explicitly scheduled interactive run. ReleaseTesting uses optimized testable code with test-host signing accommodations; packaged production performance remains a distinct gate. Lower-priority background benchmarks can contend with other work and do not refresh historical performance baselines. This change limits concurrency and removes desktop automation from routine checks; it does not impose an OS CPU/RAM quota.
 
-Current outcome: G01 and G02 are implemented and verified for routine background use. G03–G05 remain open and unimplemented. IN-01/G06's compiler issue is fixed and build-verified as a necessary part of G02; its 10,000-bookmark workload/timing acceptance is still deferred. Changes are uncommitted and unmerged.
+G01/G02 checkpoint outcome (subsequently committed as `76f7c28`): implemented, background verified, and owner smoke accepted. IN-01/G06's compiler issue is fixed and build-verified as a necessary part of G02; its workload/timing acceptance is still deferred. Later G03/G04 work is recorded separately below.
 
 
 ### Owner acceptance and continuation
 
 2026-09-06: the owner reported successful smoke testing and authorized committing the complete G01/G02 slice, then implementing G03 and G04. This is owner-reported smoke acceptance; no additional interactive automation was run by the agent. G03/G04 work starts from the accepted G01/G02 checkpoint.
+
+
+## G03/G04 remediation — 2026-09-06 (current checkpoint)
+
+Authorization: after reporting G01/G02 smoke success, the owner asked to commit everything and continue G03/G04. The accepted prior slice is local commit `76f7c28`; G03/G04 were subsequently smoke-tested and approved for local commit by the owner. Design written before implementation: [bookmark transactions and Close ownership](g03-g04-bookmark-transactions-and-close-design.md).
+
+### Implemented behavior
+
+- **BE-02 / G03:** `BookmarkRepository` journals exact prior primary/backup images before any active file mutation. Removing the journal commits the operation. Add/edit/delete/reset/restore publish memory only afterward. Failed steps restore the prior images; interrupted or failed rollback is completed before future reads or writes. Unreadable journals remain in place and block interpretation of possibly uncommitted copies. Schema-1 active files remain compatible. The journal is transient, introduces one additional atomic write per mutation, and is absent after a successful operation; no timing claim is made.
+- **BE-03 / G03:** preservation compares actual bytes against SHA-256 filenames and legacy UUID copies, reusing identical input. A mismatching hash-named artifact is retained and a distinct destination is used. Reset preserves a corrupt primary even without a preceding load; existing preserved artifacts are retained.
+- **FE-01 / G04:** `BrowserCloseCommand` creates the installed Command-W menu item and resolves the key window on each validation/action. Browser ownership invokes the existing selected-tab teardown; auxiliary ownership uses native `performClose`; no key window or an attached/key sheet disables Close. Explicit Close Window and title-bar behavior are unchanged. The command holds the browser weakly and never falls back to a background window.
+- Two native-menu XCTest cases cover browser address/content and actual Bookmarks/Privacy window objects; another covers no-window/sheet/cancel guards. Key equivalents are dispatched through `NSMenu.performKeyEquivalent`, not substituted with only direct controller calls. The key-window lookup and sheet relationships are injected into hidden fixtures, so these tests do not establish actual desktop focus/sheet behavior. Two XCUI cases were added for visible auxiliary-window Close and bookmark-editor sheet protection, and compiled without execution.
+
+### Verification
+
+All commands ran in `/Users/utpalrohan/code/browser`, using G02's isolated testhost, temporary repository data, serial tests, bounded build/compiler work, and no desktop input injection.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| `./scripts/run-tests.sh` | **159 tests passed, zero failures**; XCTest 8.063 seconds | `.build/TestResults.xhULq9/Browser.xcresult` and adjacent `xcodebuild.log` |
+| `./scripts/run-tests.sh --release` | **159 tests passed, zero failures**; XCTest 7.903 seconds | `.build/TestResults.NWVX53/Browser.xcresult` and adjacent `xcodebuild.log` |
+| `./scripts/run-tests.sh --ui-only --build-only` | UI suite including new Command-W cases compiled; not executed | `.build/TestResults.TH2sJe/Browser.xcresult` |
+| `make verify-release DERIVED_DATA=.build/G03G04ReleaseDerivedData` | Production Release build, signature, arm64, sandbox, hardened runtime, and pinned blocker assets passed | `/private/tmp/browser-g03-g04-production.log`; app at `.build/G03G04ReleaseDerivedData/Build/Products/Release/Browser.app` |
+| `./scripts/run-bookmark-benchmark.sh --build-only` | Standalone benchmark compiled with the new repository/CryptoKit dependency; workload not run | `.build/BookmarkBenchmark/BookmarkRepositoryBenchmark`; command exit 0 |
+| `git diff --check`, scheme XML and selection inspection | Passed; both new background classes explicitly selected | Working tree and Browser scheme |
+
+The nine transaction tests include **23 injected durable-step failures** across first add, later add, edit, delete, reset, and restore, plus **18 interrupted-state fixtures**. They compare exact previous bytes, cached/fresh snapshots and explicit backup recovery; cover rollback failures including inability to delete a first-save backup, malformed journals, successful scrubbing/journal removal, repeated corruption, legacy-copy reuse, and mismatching preserved-artifact names. Existing repository regressions also remain green.
+
+The initial hidden menu test expected AppKit to return false for a disabled key equivalent. Runtime showed AppKit can consume the key without dispatching the action. The test now asserts the relevant behavior: disabled menu state, zero close requests, and unchanged tabs. No application behavior was changed to satisfy that return-value expectation.
+
+Limits: no live production bookmark files, interactive suite, benchmark workload, or production app launch was used. The owner subsequently reported successful G03/G04 smoke testing and accepted this slice. The specific manual scenarios exercised were not itemized; this report does not infer that every recovery or sheet case was covered, and automated interactive suites remain unrun. The journal protocol assumes one repository writer and Foundation atomic replacement; it does not claim additional power-loss durability or coordinated concurrent writers. README now documents journal-aware export/reset/erasure and the design documents rollback to older builds.
+
+Current outcome: G03/G04 implementation and background/package verification are complete, with owner-reported smoke acceptance and authorization for local commit. G05 application changes and benchmark workload acceptance were not included.
+
+
+### G03/G04 owner acceptance and remaining work
+
+2026-09-06: the owner reported “looks good. I smoke tested” and authorized committing G03/G04. This records owner acceptance without attributing additional automated results or specific unreported manual cases.
+
+Remaining application work is **G05 / FE-02**: expose a failed main-document destination as an explicit site-exception recovery action, including when the tab has never committed a page, while guarding stale/redirected attempts and background-tab policy.
+
+**G06 / IN-01** has no outstanding compiler fix: dependency closure and build-only checks passed through G02/G03. Remaining verification is the separately invocable 10,000-bookmark workload and controlled timing acceptance. Full interactive UI/performance automation also remains deferred to a session where desktop input is available. No such workload or automation was run for this commit.

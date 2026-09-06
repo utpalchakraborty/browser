@@ -56,6 +56,8 @@
                ReferencedContainer = "container:Browser.xcodeproj">
             </BuildableReference>
             <SelectedTests>
+               <Test Identifier = "BookmarkTransactionTests" />
+               <Test Identifier = "BrowserCloseCommandTests" />
                <Test Identifier = "AddressInterpreterTests" />
                <Test Identifier = "AddressSubmissionTests" />
                <Test Identifier = "AppDelegateContentBlockingTests" />
