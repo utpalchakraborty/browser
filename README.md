@@ -61,22 +61,45 @@ window presentation remained about 93 ms.
 ## Build and verify
 
 ~~~sh
-make check
-make performance
-make resource-one
+make check                          # background Debug/Release checks + Release verification
+BROWSER_BUILD_JOBS=1 make test       # default is 2 jobs; tests always run serially
+make bookmark-benchmark             # standalone, no app or UI automation
+make blocker-benchmark              # isolated background WebKit benchmark
+make performance-build              # compile interactive tests without launching them
 ~~~
 
-`make check` runs Debug and Release functional suites and verifies the
-production Release signature, architecture, entitlements, hardened runtime,
-and independently pinned blocker manifest, generated rules, notices, and
-license. Some specialized checks launch apps or take several minutes;
-`make network-audit` also requests administrator authorization for an
-attributed macOS packet capture.
+Routine checks use a separate `com.utpalchakraborty.browser.testhost` identity
+and a nonactivating host with no startup window or production services.
+The Browser scheme explicitly selects reviewed background test classes. New test
+classes must be reviewed and added to its SelectedTests list. Visible-window
+AppKit tests, XCUI automation, and timing benchmarks are excluded from routine
+checks; a passing `make check` does not claim those interactive gates passed.
+
+The test/benchmark runners serialize runs, lower scheduling priority, and limit
+build concurrency (`BROWSER_BUILD_JOBS=1..8`), bound Swift batches, and disable
+Swift's automatic multithreaded whole-module optimization. Ctrl-C stops the run and its owned
+fixtures/test products without terminating the user's Browser. Avoid simultaneous
+runs of these test schemes from Xcode while the CLI runner owns them. Explicit
+interactive performance runs retain the caller's priority; their test build identity
+and signing differ from the production app, so packaged performance remains a
+separate acceptance check. Concurrency is
+bounded, not a hard memory or CPU cap. Standalone timings taken while other
+work is running should be treated as diagnostic.
+
+Run the following only when desktop input is available for automation:
+
+~~~sh
+make interactive-test               # visible-window AppKit tests, then XCUI workflows
+make ui-test                        # XCUI workflows only
+make performance INTERACTIVE=1      # repeated app launches, typing, clicks, scrolling
+~~~
+
+`make check` also verifies the production Release signature, architecture,
+entitlements, hardened runtime, and independently pinned blocker assets.
+Other specialized gates remain explicit; some launch apps or take several minutes:
 
 ~~~sh
 make profile-probe
-make blocker-benchmark
-make performance
 make resource-one
 make resource-ten
 make webcontent-termination

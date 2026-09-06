@@ -1,14 +1,21 @@
+.NOTPARALLEL:
+
 PROJECT := Browser.xcodeproj
 SCHEME := Browser
 DERIVED_DATA := .build/DerivedData
+BROWSER_BUILD_JOBS ?= 2
+export BROWSER_BUILD_JOBS
+
 DESTINATION := platform=macOS,arch=arm64
 
 .PHONY: build release run verify-release test release-test ui-test performance-build performance \
-	profile-probe blocker-benchmark resource-one resource-ten network-audit \
+	interactive-test bookmark-benchmark profile-probe blocker-benchmark resource-one resource-ten network-audit \
 	container-audit container-audit-test webcontent-termination check clean
 
 build:
-	xcodebuild \
+	nice -n 10 xcodebuild -jobs "$(BROWSER_BUILD_JOBS)" \
+		SWIFT_USE_PARALLEL_WHOLE_MODULE_OPTIMIZATION=NO \
+		'OTHER_SWIFT_FLAGS=$$(inherited) -num-threads 1 -driver-batch-count $(BROWSER_BUILD_JOBS)' \
 		-project "$(PROJECT)" \
 		-scheme "$(SCHEME)" \
 		-configuration Debug \
@@ -17,7 +24,9 @@ build:
 		build
 
 release:
-	xcodebuild \
+	nice -n 10 xcodebuild -jobs "$(BROWSER_BUILD_JOBS)" \
+		SWIFT_USE_PARALLEL_WHOLE_MODULE_OPTIMIZATION=NO \
+		'OTHER_SWIFT_FLAGS=$$(inherited) -num-threads 1 -driver-batch-count $(BROWSER_BUILD_JOBS)' \
 		-project "$(PROJECT)" \
 		-scheme "$(SCHEME)" \
 		-configuration Release \
@@ -30,14 +39,20 @@ run: release
 	open "$(DERIVED_DATA)/Build/Products/Release/Browser.app"
 
 verify-release: release
-	./scripts/verify-release.sh
+	./scripts/verify-release.sh "$(DERIVED_DATA)/Build/Products/Release/Browser.app"
 
 test:
 	./scripts/run-tests.sh
 
 release-test:
-	./scripts/run-tests.sh --release --unit-only
-	./scripts/run-tests.sh --release --ui-only
+	./scripts/run-tests.sh --release
+
+interactive-test:
+	./scripts/run-tests.sh --interactive
+	./scripts/run-tests.sh --ui-only
+
+bookmark-benchmark:
+	./scripts/run-bookmark-benchmark.sh
 
 ui-test:
 	./scripts/run-tests.sh --ui-only
@@ -46,7 +61,8 @@ performance-build:
 	./scripts/run-performance-tests.sh --build-only
 
 performance:
-	./scripts/run-performance-tests.sh
+	@test "$(INTERACTIVE)" = 1 || (echo "Use make performance INTERACTIVE=1 when desktop input is available."; exit 2)
+	./scripts/run-performance-tests.sh --interactive
 
 profile-probe:
 	./scripts/run-cross-process-profile-probe.sh
@@ -75,7 +91,9 @@ webcontent-termination: verify-release
 check: build test release-test verify-release
 
 clean:
-	xcodebuild \
+	nice -n 10 xcodebuild -jobs "$(BROWSER_BUILD_JOBS)" \
+		SWIFT_USE_PARALLEL_WHOLE_MODULE_OPTIMIZATION=NO \
+		'OTHER_SWIFT_FLAGS=$$(inherited) -num-threads 1 -driver-batch-count $(BROWSER_BUILD_JOBS)' \
 		-project "$(PROJECT)" \
 		-scheme "$(SCHEME)" \
 		-derivedDataPath "$(DERIVED_DATA)" \

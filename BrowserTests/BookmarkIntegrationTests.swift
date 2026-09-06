@@ -106,7 +106,7 @@ final class BookmarkIntegrationTests: XCTestCase {
         )
         XCTAssertEqual(
             uiTest.directoryURL.path,
-            "/tmp/browser-support/com.utpalchakraborty.browser/UITests"
+            "/tmp/browser-support/com.utpalchakraborty.browser.testhost/UITests"
         )
         XCTAssertTrue(uiTest.resetOnLaunch)
 

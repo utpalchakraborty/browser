@@ -16,7 +16,7 @@ final class BrowserProfile {
     let websiteDataStore: WKWebsiteDataStore
     let webViewFactory: WebViewFactory
 
-    init(dataStoreIdentifier: UUID = normalDataStoreIdentifier) {
+    init(dataStoreIdentifier: UUID = BrowserLaunchConfiguration.current.dataStoreIdentifier) {
         let websiteDataStore = WKWebsiteDataStore(
             forIdentifier: dataStoreIdentifier
         )
@@ -28,15 +28,7 @@ final class BrowserProfile {
         environment: [String: String],
         arguments: [String] = []
     ) -> UUID {
-        if arguments.contains("--performance-test") {
-            return performanceDataStoreIdentifier
-        }
-        if arguments.contains("--ui-test-profile") {
-            return testHostDataStoreIdentifier
-        }
-        if environment["XCTestConfigurationFilePath"] != nil {
-            return testHostDataStoreIdentifier
-        }
-        return normalDataStoreIdentifier
+        BrowserLaunchConfiguration(environment: environment, arguments: arguments)
+            .dataStoreIdentifier
     }
 }

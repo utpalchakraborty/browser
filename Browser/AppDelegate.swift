@@ -11,11 +11,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let maximumPerformanceViewCount = 10
     private static let initialWebViewDeferralMilliseconds = 100
 
+    private let launchConfiguration = BrowserLaunchConfiguration.current
     private lazy var profile = BrowserProfile(
-        dataStoreIdentifier: BrowserProfile.applicationDataStoreIdentifier(
-            environment: ProcessInfo.processInfo.environment,
-            arguments: ProcessInfo.processInfo.arguments
-        )
+        dataStoreIdentifier: launchConfiguration.dataStoreIdentifier
     )
     private var browserWindowController: BrowserWindowController?
     private var contentBlockingCoordinator: ContentBlockingCoordinator?
@@ -25,7 +23,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     static func main() {
         let application = NSApplication.shared
-        installApplicationIcon(on: application)
+        if !BrowserLaunchConfiguration.current.allowsActivation {
+            application.setActivationPolicy(.prohibited)
+        } else {
+            installApplicationIcon(on: application)
+        }
         let delegate = AppDelegate()
         application.delegate = delegate
         withExtendedLifetime(delegate) {
@@ -34,6 +36,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard launchConfiguration.startsApplication else {
+            NSApp.setActivationPolicy(launchConfiguration.allowsActivation ? .regular : .prohibited)
+            return
+        }
 #if DEBUG
         if startProfilePersistenceProbeIfRequested() {
             return
@@ -44,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.disableRelaunchOnLogin()
 
         let contentBlockingCoordinator = Self.makeContentBlockingCoordinator(
-            arguments: CommandLine.arguments
+            configuration: launchConfiguration
         )
         self.contentBlockingCoordinator = contentBlockingCoordinator
 
@@ -53,9 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         let controller = BrowserWindowController(
             searchProvider: BrowserPreferences.searchProvider(),
-            frameAutosaveName: Self.windowFrameAutosaveName(
-                arguments: CommandLine.arguments
-            ),
+            frameAutosaveName: launchConfiguration.frameAutosaveName,
             contentBlockingCoordinator: contentBlockingCoordinator
         )
         browserWindowController = controller
@@ -81,15 +85,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller?.ensureInitialAddressFieldFocus()
         }
 
-        DispatchQueue.main.async { [weak controller] in
+        DispatchQueue.main.async { [weak controller, launchConfiguration] in
             guard
                 let controller,
                 let applicationSupportDirectory = FileManager.default.urls(
                     for: .applicationSupportDirectory,
                     in: .userDomainMask
                 ).first,
-                let configuration = Self.bookmarkLaunchConfiguration(
-                    arguments: CommandLine.arguments,
+                let configuration = launchConfiguration.bookmarkConfiguration(
                     applicationSupportDirectory: applicationSupportDirectory
                 )
             else {
@@ -158,7 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let websiteDataController = WebsiteDataController(
                     websiteDataStore: profile.websiteDataStore
                 )
-                if Self.shouldResetWebsiteData(arguments: CommandLine.arguments) {
+                if self.launchConfiguration.shouldResetWebsiteData {
                     await websiteDataController.clearAllWebsiteData()
                     guard
                         self.browserWindowController === controller,
@@ -195,7 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        launchConfiguration.startsApplication
     }
 
     func applicationShouldSaveApplicationState(_ sender: NSApplication) -> Bool {
@@ -223,38 +226,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static func windowFrameAutosaveName(
         arguments: [String]
     ) -> NSWindow.FrameAutosaveName? {
-        if arguments.contains("--ui-test-profile") {
-            return BrowserWindowController.uiTestWindowFrameAutosaveName
-        }
-        if arguments.contains("--performance-test")
-            || arguments.contains("-ApplePersistenceIgnoreState")
-        {
-            return nil
-        }
-        return BrowserWindowController.mainWindowFrameAutosaveName
+        BrowserLaunchConfiguration(arguments: arguments).frameAutosaveName
     }
 
     static func bookmarkLaunchConfiguration(
         arguments: [String],
         applicationSupportDirectory: URL
     ) -> BookmarkLaunchConfiguration? {
-        if arguments.contains("--performance-test") {
-            return nil
-        }
-
-        let rootDirectory = applicationSupportDirectory.appendingPathComponent(
-            "com.utpalchakraborty.browser",
-            isDirectory: true
-        )
-        let isUITest = arguments.contains("--ui-test-profile")
-        let directoryURL = isUITest
-            ? rootDirectory.appendingPathComponent("UITests", isDirectory: true)
-            : rootDirectory
-        return BookmarkLaunchConfiguration(
-            directoryURL: directoryURL,
-            resetOnLaunch: isUITest
-                && arguments.contains("--reset-ui-test-bookmarks")
-        )
+        BrowserLaunchConfiguration(arguments: arguments)
+            .bookmarkConfiguration(applicationSupportDirectory: applicationSupportDirectory)
     }
 
     static func performanceViewCount(arguments: [String]) -> Int {
@@ -318,51 +298,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     static func contentBlockerStateKey(arguments: [String]) -> String {
-        arguments.contains("--ui-test-profile")
-            ? "contentBlocker.uiTests.lastValidRuleSet"
-            : "contentBlocker.lastValidRuleSet"
+        BrowserLaunchConfiguration(arguments: arguments).contentBlockerStateKey
     }
 
     static func contentBlockerSitePolicyKey(arguments: [String]) -> String {
-        arguments.contains("--ui-test-profile")
-            ? "contentBlocker.uiTests.sitePolicy"
-            : "contentBlocker.sitePolicy"
+        BrowserLaunchConfiguration(arguments: arguments).contentBlockerSitePolicyKey
     }
 
     static func shouldResetWebsiteData(arguments: [String]) -> Bool {
-        arguments.contains("--ui-test-profile")
-            && arguments.contains("--reset-ui-test-website-data")
+        BrowserLaunchConfiguration(arguments: arguments).shouldResetWebsiteData
     }
 
-    static func contentBlockerArtifactResetScope(
-        arguments: [String]
-    ) -> ContentBlockerArtifactResetScope {
-        arguments.contains("--ui-test-profile")
-            ? .identifierPrefix("browser-ui-test-")
-            : .all
+    static func contentBlockerArtifactResetScope(arguments: [String]) -> ContentBlockerArtifactResetScope {
+        BrowserLaunchConfiguration(arguments: arguments).artifactResetScope
     }
 
     private static func makeContentBlockingCoordinator(
-        arguments: [String]
+        configuration: BrowserLaunchConfiguration
     ) -> ContentBlockingCoordinator {
         let stateStore = ContentBlockerStateStore(
-            key: contentBlockerStateKey(arguments: arguments)
+            defaults: configuration.defaults,
+            key: configuration.contentBlockerStateKey
         )
         let sitePolicyStore = ContentBlockerSitePolicyStore(
-            key: contentBlockerSitePolicyKey(arguments: arguments)
+            defaults: configuration.defaults,
+            key: configuration.contentBlockerSitePolicyKey
         )
-        if arguments.contains("--ui-test-profile")
-            && arguments.contains("--reset-ui-test-content-blocking")
-        {
-            sitePolicyStore.reset()
-        }
+        if configuration.shouldResetSitePolicy { sitePolicyStore.reset() }
         return ContentBlockingCoordinator(
             resolver: ContentBlockerRuleSetResolver(
-                service: ContentBlockerService(),
+                service: ContentBlockerService(ruleStore: configuration.makeContentRuleListStore()),
                 stateStore: stateStore,
-                artifactResetScope: contentBlockerArtifactResetScope(
-                    arguments: arguments
-                )
+                artifactResetScope: configuration.artifactResetScope
             ),
             sitePolicyStore: sitePolicyStore
         )

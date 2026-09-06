@@ -35,24 +35,10 @@
                ReferencedContainer = "container:Browser.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "NO"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "B20000000000000000000020"
-               BuildableName = "BrowserUITests.xctest"
-               BlueprintName = "BrowserUITests"
-               ReferencedContainer = "container:Browser.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
-      buildConfiguration = "Debug"
+      buildConfiguration = "DebugTesting"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       codeCoverageEnabled = "NO"
@@ -69,17 +55,33 @@
                BlueprintName = "BrowserTests"
                ReferencedContainer = "container:Browser.xcodeproj">
             </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "B20000000000000000000020"
-               BuildableName = "BrowserUITests.xctest"
-               BlueprintName = "BrowserUITests"
-               ReferencedContainer = "container:Browser.xcodeproj">
-            </BuildableReference>
+            <SelectedTests>
+               <Test Identifier = "AddressInterpreterTests" />
+               <Test Identifier = "AddressSubmissionTests" />
+               <Test Identifier = "AppDelegateContentBlockingTests" />
+               <Test Identifier = "BookmarkIntegrationTests" />
+               <Test Identifier = "BookmarkRepositoryTests" />
+               <Test Identifier = "BookmarkTests" />
+               <Test Identifier = "BrowserLaunchConfigurationTests" />
+               <Test Identifier = "BrowserPageErrorTests" />
+               <Test Identifier = "BrowserPreferencesTests" />
+               <Test Identifier = "BrowserProfileTests" />
+               <Test Identifier = "ContentBlockerBundleTests" />
+               <Test Identifier = "ContentBlockerRuleSetResolverTests" />
+               <Test Identifier = "ContentBlockerServiceTests" />
+               <Test Identifier = "ContentBlockerSitePolicyStoreTests" />
+               <Test Identifier = "ContentBlockerSiteTests" />
+               <Test Identifier = "ContentBlockerStateStoreTests" />
+               <Test Identifier = "ContentBlockingCoordinatorTests" />
+               <Test Identifier = "ContentBlockingNavigationStateTests" />
+               <Test Identifier = "LocalFileAccessTests" />
+               <Test Identifier = "NavigationPolicyTests" />
+               <Test Identifier = "PageZoomTests" />
+               <Test Identifier = "TabManagerTests" />
+               <Test Identifier = "WebKitEdgeCaseTests" />
+               <Test Identifier = "WebsiteDataControllerTests" />
+               <Test Identifier = "WebsiteDataSnapshotTests" />
+            </SelectedTests>
          </TestableReference>
       </Testables>
    </TestAction>

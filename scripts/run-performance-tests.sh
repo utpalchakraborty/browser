@@ -3,57 +3,47 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-derived_data="$project_root/.build/PerformanceDerivedData"
-bookmark_benchmark_directory="$derived_data/BookmarkBenchmark"
-bookmark_benchmark_binary="$bookmark_benchmark_directory/BookmarkRepositoryBenchmark"
-
+if [ "${BROWSER_VERIFICATION_SUPERVISED:-}" != 1 ]; then
+    exec /usr/bin/python3 "$project_root/scripts/verification-session.py" "$0" "$@"
+fi
+derived_data="$project_root/.build/TestingDerivedData"
+if [ "$#" -ne 1 ]; then
+    echo "usage: $0 --interactive | --build-only" >&2
+    exit 2
+fi
 case "${1:-}" in
-    "")
+    --interactive)
         build_only=0
         ;;
     --build-only)
         build_only=1
         ;;
     *)
-        echo "usage: $0 [--build-only]" >&2
+        echo "usage: $0 --interactive | --build-only (interactive runs take over desktop input)" >&2
         exit 2
         ;;
 esac
 
 mkdir -p "$project_root/.build"
 
-xcodebuild \
+xcodebuild -jobs "$BROWSER_BUILD_JOBS" \
     -project "$project_root/Browser.xcodeproj" \
     -scheme BrowserPerformance \
-    -configuration Release \
+    -configuration ReleaseTesting \
     -destination "platform=macOS,arch=arm64" \
     -derivedDataPath "$derived_data" \
     -enableCodeCoverage NO \
     -parallel-testing-enabled NO \
+    SWIFT_USE_PARALLEL_WHOLE_MODULE_OPTIMIZATION=NO \
+    "OTHER_SWIFT_FLAGS=\$(inherited) -num-threads 1 -driver-batch-count $BROWSER_BUILD_JOBS" \
     build-for-testing
 
-mkdir -p "$bookmark_benchmark_directory"
-xcrun --sdk macosx swiftc \
-    -O \
-    -whole-module-optimization \
-    -parse-as-library \
-    -swift-version 6 \
-    -strict-concurrency=complete \
-    -default-isolation MainActor \
-    -module-cache-path "$bookmark_benchmark_directory/ModuleCache" \
-    -D BOOKMARK_REPOSITORY_BENCHMARK \
-    "$project_root/Browser/Bookmark.swift" \
-    "$project_root/Browser/BookmarkSearch.swift" \
-    "$project_root/Browser/BookmarkRepository.swift" \
-    "$project_root/BrowserPerformanceTests/BookmarkRepositoryBenchmark.swift" \
-    -o "$bookmark_benchmark_binary"
-
 if [ "$build_only" -eq 1 ]; then
+    "$project_root/scripts/run-bookmark-benchmark.sh" --build-only
     exit 0
 fi
 
 result_directory=$(mktemp -d "$project_root/.build/PerformanceResults.XXXXXX")
-bookmark_benchmark_report="$result_directory/bookmark-benchmark.log"
 launch_result_bundle="$result_directory/BrowserLaunchPerformance.xcresult"
 interaction_result_bundle="$result_directory/BrowserInteractionPerformance.xcresult"
 fixture_port=18768
@@ -61,8 +51,6 @@ fixture_token=${result_directory##*.}
 fixture_origin="http://127.0.0.1:$fixture_port"
 fixture_log="$result_directory/fixture-server.log"
 
-"$bookmark_benchmark_binary" >"$bookmark_benchmark_report"
-/bin/cat "$bookmark_benchmark_report"
 
 /usr/bin/python3 \
     "$project_root/TestSupport/fixture_server.py" \
@@ -75,7 +63,9 @@ cleanup() {
     kill "$fixture_pid" 2>/dev/null || true
     wait "$fixture_pid" 2>/dev/null || true
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 attempt=0
 until /usr/bin/curl --fail --silent --show-error \
@@ -89,26 +79,30 @@ do
     sleep 0.1
 done
 
-xcodebuild \
+xcodebuild -jobs "$BROWSER_BUILD_JOBS" \
     -project "$project_root/Browser.xcodeproj" \
     -scheme BrowserPerformance \
-    -configuration Release \
+    -configuration ReleaseTesting \
     -destination "platform=macOS,arch=arm64" \
     -derivedDataPath "$derived_data" \
     -enableCodeCoverage NO \
     -parallel-testing-enabled NO \
+    SWIFT_USE_PARALLEL_WHOLE_MODULE_OPTIMIZATION=NO \
+    "OTHER_SWIFT_FLAGS=\$(inherited) -num-threads 1 -driver-batch-count $BROWSER_BUILD_JOBS" \
     -only-testing:BrowserPerformanceTests/BrowserLaunchPerformanceTests/testFocusedSinglePageBrowserLaunch \
     -resultBundlePath "$launch_result_bundle" \
     test-without-building
 
-xcodebuild \
+xcodebuild -jobs "$BROWSER_BUILD_JOBS" \
     -project "$project_root/Browser.xcodeproj" \
     -scheme BrowserPerformance \
-    -configuration Release \
+    -configuration ReleaseTesting \
     -destination "platform=macOS,arch=arm64" \
     -derivedDataPath "$derived_data" \
     -enableCodeCoverage NO \
     -parallel-testing-enabled NO \
+    SWIFT_USE_PARALLEL_WHOLE_MODULE_OPTIMIZATION=NO \
+    "OTHER_SWIFT_FLAGS=\$(inherited) -num-threads 1 -driver-batch-count $BROWSER_BUILD_JOBS" \
     -only-testing:BrowserPerformanceTests/BrowserLaunchPerformanceTests/testDeterministicLocalNavigationAndCommandResponse \
     -only-testing:BrowserPerformanceTests/BrowserLaunchPerformanceTests/testBackAndForwardCommandResponse \
     -only-testing:BrowserPerformanceTests/BrowserLaunchPerformanceTests/testControlledScrollingResponsiveness \
@@ -120,7 +114,6 @@ xcodebuild \
 
 echo "Launch performance result bundle: $launch_result_bundle" >&2
 echo "Interaction performance result bundle: $interaction_result_bundle" >&2
-echo "Bookmark benchmark report: $bookmark_benchmark_report" >&2
 launch_metrics_json="$result_directory/launch-metrics.json"
 interaction_metrics_json="$result_directory/interaction-metrics.json"
 xcrun xcresulttool get test-results metrics \

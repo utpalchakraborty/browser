@@ -242,6 +242,7 @@ nonisolated struct AddressInterpreter: Sendable {
             "ftp",
             "javascript",
             "mailto",
+            "magnet",
             "sms",
             "tel",
         ]

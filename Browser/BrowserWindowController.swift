@@ -29,6 +29,7 @@ final class BrowserWindowController: NSWindowController,
     var tabCount: Int { tabManager.tabs.count }
     var tabIDs: [UUID] { tabManager.tabs.map(\.id) }
     var selectedTabID: UUID { tabManager.selectedTabID }
+    var pendingNavigationURL: URL? { tabManager.selectedTab.pendingNavigationURL }
 
     private let chromeView: BrowserChromeView
     private let contentBlockingCoordinator: ContentBlockingCoordinator?

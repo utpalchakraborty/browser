@@ -224,4 +224,21 @@ final class AddressInterpreterTests: XCTestCase {
             )
         }
     }
+    func testMagnetAddressesNeverBecomeSearchQueries() {
+        for provider in SearchProvider.allCases {
+            let interpreter = AddressInterpreter(searchProvider: provider)
+            for input in [
+                "magnet:?xt=urn:btih:private-hash&dn=private-name&tr=https%3A%2F%2Ftracker.example",
+                "MAGNET:?xt=urn:btih:private-hash",
+                " \nMaGnEt:?xt=urn:btih:private-hash&dn=private name\t ",
+                "magnet:",
+            ] {
+                for intent in [AddressSubmissionIntent.standard, .completeDotCom] {
+                    XCTAssertEqual(interpreter.interpret(input, intent: intent),
+                                   .failure(.unsupportedScheme("magnet")), input)
+                }
+            }
+        }
+    }
+
 }
