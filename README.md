@@ -140,6 +140,9 @@ scripts, styles, and sibling pages can load.
 - Command-T creates and selects a fresh blank tab, then focuses the address
   field. The `+` button performs the same action.
 - Click a tab to select it, or use its close control to close it.
+- Highlight a web address in page text, right-click, and choose **Open Selected
+  URL in New Tab** to open and select a new tab. Full HTTP(S) addresses and bare
+  hostnames such as `example.com/path` work; ordinary text is not searched.
 - Command-W closes the selected tab. Closing the sole remaining tab replaces it
   with a fresh blank tab and focuses the address field.
 - Shift-Command-W closes the browser window.

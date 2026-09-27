@@ -59,6 +59,7 @@
                <Test Identifier = "BookmarkTransactionTests" />
                <Test Identifier = "BrowserCloseCommandTests" />
                <Test Identifier = "AddressInterpreterTests" />
+               <Test Identifier = "SelectedURLTests" />
                <Test Identifier = "AddressSubmissionTests" />
                <Test Identifier = "AppDelegateContentBlockingTests" />
                <Test Identifier = "BookmarkIntegrationTests" />

@@ -394,6 +394,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
         observations.forEach { $0.invalidate() }
         observations.removeAll()
         if let webView {
+            (webView as? BrowserWebView)?.onOpenSelectedURL = nil
             webView.navigationDelegate = nil
             webView.uiDelegate = nil
             webView.stopLoading()
@@ -830,7 +831,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
             return nil
         }
 
-        let constructWebView = { [self] () -> WKWebView? in
+        let constructWebView = { [self] () -> BrowserWebView? in
             self.makeWebView(factory: webViewFactory, for: url)
         }
         let constructedWebView = measureInitialConstruction
@@ -846,6 +847,13 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
         newWebView.translatesAutoresizingMaskIntoConstraints = false
         newWebView.navigationDelegate = self
         newWebView.uiDelegate = self
+        newWebView.onOpenSelectedURL = { [weak self, weak newWebView] url in
+            guard let self, let newWebView,
+                  self.acceptsDelegateCallback(from: newWebView) else {
+                return
+            }
+            self.onOpenTab?(URLRequest(url: url), .foregroundTab)
+        }
         newWebView.setAccessibilityLabel("Web page")
         newWebView.setAccessibilityValue("Loading")
         webView = newWebView
@@ -857,7 +865,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
     private func makeWebView(
         factory: WebViewFactory,
         for url: URL
-    ) -> WKWebView? {
+    ) -> BrowserWebView? {
         if let contentBlockingCoordinator {
             let contentController = WKUserContentController()
             guard contentBlockingCoordinator.applyPolicy(

@@ -224,6 +224,37 @@ final class AddressInterpreterTests: XCTestCase {
             )
         }
     }
+    func testSelectedWebAddressesRequireAWholeURLWithoutSearchFallback() {
+        let valid = [
+            (" \nhttps://example.com/path?q=one%20two#part\t", "https://example.com/path?q=one%20two#part"),
+            ("HTTP://example.com/path", "http://example.com/path"),
+            ("example.com/path?q=1&b=2", "https://example.com/path?q=1&b=2"),
+            ("localhost:8080/page", "https://localhost:8080/page"),
+            ("127.0.0.1:8080/page", "https://127.0.0.1:8080/page"),
+            ("https://[::1]:8080/", "https://[::1]:8080/"),
+        ]
+        for (selection, expected) in valid {
+            XCTAssertEqual(
+                AddressInterpreter.selectedWebURL(from: selection)?.absoluteString,
+                expected, selection
+            )
+        }
+
+        for selection in [
+            "", "ordinary text", "example", "Visit https://example.com",
+            "https://example.com https://other.example", "https://example.com/a b",
+            "https://example.com/a\nb", "https://example.com/\u{0}b",
+            "https://", "http:example.com", "example..com", "example.com:99999",
+            "https://user:password@example.com", "user@example.com",
+            "javascript:alert(1)", "mailto:user@example.com", "magnet:?xt=private",
+            "file:///tmp/example.html", "/tmp/example.html", "about:blank",
+            "data:text/html,hello", "custom://example.com", "//example.com",
+            "<a href=\"https://example.com\">Example</a>",
+        ] {
+            XCTAssertNil(AddressInterpreter.selectedWebURL(from: selection), selection)
+        }
+    }
+
     func testMagnetAddressesNeverBecomeSearchQueries() {
         for provider in SearchProvider.allCases {
             let interpreter = AddressInterpreter(searchProvider: provider)

@@ -12,7 +12,7 @@ final class WebViewFactory {
         frame: CGRect = .zero,
         contentRuleLists: [WKContentRuleList] = [],
         userContentController: WKUserContentController? = nil
-    ) -> WKWebView {
+    ) -> BrowserWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = websiteDataStore
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
@@ -24,6 +24,6 @@ final class WebViewFactory {
             configuration.userContentController.add(ruleList)
         }
 
-        return WKWebView(frame: frame, configuration: configuration)
+        return BrowserWebView(frame: frame, configuration: configuration)
     }
 }

@@ -149,6 +149,25 @@ nonisolated struct AddressInterpreter: Sendable {
         return .localFile(normalizedURL)
     }
 
+    /// Recognize a whole selected address without falling back to a search.
+    static func selectedWebURL(from selection: String) -> URL? {
+        let input = selection.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !input.isEmpty,
+              input.rangeOfCharacter(
+                from: .whitespacesAndNewlines.union(.controlCharacters)
+              ) == nil
+        else {
+            return nil
+        }
+
+        if let scheme = explicitScheme(in: input),
+           ["http", "https"].contains(scheme.lowercased())
+        {
+            return validWebURL(from: input)
+        }
+        return inferredHTTPSURL(from: input)
+    }
+
     private static func dotComShortcutURL(from input: String) -> URL? {
         guard
             !input.contains("."),
