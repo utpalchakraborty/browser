@@ -157,7 +157,7 @@ BrowserWindowController owns one browser window, including:
 - the selected tab's WKWebView container;
 - keyboard focus and command routing to the selected tab;
 - configuration of native frame autosave for the main window;
-- bookmark-button state and presentation of the bookmark editor and manager;
+- bookmark-button state and presentation of the bookmark sidebar, editor, and manager;
 - presentation of the user-selected folder consent flow for submitted local
   HTML paths;
 - Privacy-menu status and coordination of a user-requested current-site
@@ -305,15 +305,23 @@ file containing stable identifiers, canonical HTTP/HTTPS URLs or absolute local
   never overwritten. A valid backup is shown read-only until the user explicitly restores it
   or resets the library; unrecoverable data remains a visible error.
 - BookmarkCoordinator supplies immutable snapshots to the main-actor browser
-  toolbar, editor sheet, and searchable nonmodal manager.
+  toolbar, sidebar, editor sheet, and searchable nonmodal manager. The sidebar
+  uses a native NSTableView with one title per row and reflects loading, empty,
+  failure, and recovered-backup states without introducing another store.
 - The toolbar star and Command-D add or edit the selected tab's current page;
-  Option-Command-B opens the manager. Opening a bookmark replaces the selected
-  tab's current page.
+  Option-Command-B opens the manager. Opening a bookmark from the manager
+  replaces the selected tab's current page. A single click or Return in the
+  sidebar creates and selects a new tab through the existing tab navigation path.
+- The 224-point sidebar sits beside the page below the toolbar. Its toolbar
+  toggle and View menu command save visibility in launch-mode-specific
+  UserDefaults; the default is visible. Hiding it returns the width to the page
+  and transfers focus out of hidden controls.
 - A local bookmark persists only its explicit file URL. Opening it reuses a
   matching in-memory grant in the selected tab or presents the same exact-folder
-  consent panel used by address submission. The grant is never persisted.
+  consent panel used by address submission. A sidebar-created tab must obtain
+  its own grant. The grant is never persisted.
 
-Phase 3 deliberately has no persistent bookmarks bar and no folder hierarchy.
+The bookmark library remains flat, without a folder hierarchy.
 Command-W resolves the key window at dispatch and validation time: the main
 browser closes its selected tab, auxiliary windows use native `performClose`,
 and attached/key sheets disable Close. It never falls back to a background
@@ -432,7 +440,7 @@ request.
 | Data | Owner | Purpose | User deletion |
 | --- | --- | --- | --- |
 | Bookmarks | BookmarkRepository | Explicitly saved pages | Delete individually; reset active files; remove active files, any transaction journal, and preserved corrupt files while Browser is quit for complete erasure |
-| Required preferences | UserDefaults | Search provider | Reset settings |
+| Required preferences | UserDefaults | Search provider and bookmark sidebar visibility | Reset settings |
 | Main window frame | UserDefaults through AppKit frame autosave | Reopen at the last usable size and location | Reset settings |
 | Last-valid blocker identifiers | ContentBlockerStateStore in UserDefaults | Transactional recovery bookkeeping; contains no navigated URL | Privacy > Manage Website Data > Delete Compiled Blocking Rules |
 | Per-site blocker exceptions | ContentBlockerSitePolicyStore in UserDefaults | Explicit exact-host user choices | Toggle the current host or reset every exception in Manage Website Data |
@@ -679,7 +687,8 @@ pages for:
 - content-rule request blocking and exceptions;
 - downloads and authentication;
 - relaunch with restored window geometry but no restored browsing state;
-- bookmark add, edit, title/URL search, open-in-selected-tab, delete, and
+- bookmark add, edit, title/URL search, manager open-in-selected-tab,
+  sidebar open-in-new-tab, delete, and
   relaunch persistence;
 - tab switching without reload; and
 - web-content process recovery where automation permits.

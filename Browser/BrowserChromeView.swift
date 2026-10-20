@@ -37,9 +37,13 @@ final class BrowserChromeView: NSView {
     let reloadStopButton = NSButton()
     let addressField = BrowserAddressField()
     let bookmarkButton = NSButton()
+    let sidebarButton = NSButton()
+    let bookmarkSidebar = BookmarkSidebarView()
     let progressIndicator = NSProgressIndicator()
     let pageContainer = NSView()
     let errorView = BrowserErrorView()
+    private var pageLeadingConstraint: NSLayoutConstraint!
+    private(set) var isBookmarkSidebarVisible = true
 
     init(searchProviderName: String) {
         super.init(frame: .zero)
@@ -70,6 +74,14 @@ final class BrowserChromeView: NSView {
             identifier: "BrowserBookmarkButton"
         )
         bookmarkButton.isEnabled = false
+        configureNavigationButton(
+            sidebarButton,
+            symbolName: "sidebar.left",
+            label: "Hide Bookmarks Sidebar",
+            identifier: "BrowserSidebarToggleButton"
+        )
+        sidebarButton.setButtonType(.toggle)
+        sidebarButton.state = .on
 
         addressField.translatesAutoresizingMaskIntoConstraints = false
         addressField.bezelStyle = .roundedBezel
@@ -97,6 +109,7 @@ final class BrowserChromeView: NSView {
         toolbar.setAccessibilityIdentifier("BrowserToolbar")
 
         let controls = NSStackView(views: [
+            sidebarButton,
             backButton,
             forwardButton,
             reloadStopButton,
@@ -126,7 +139,12 @@ final class BrowserChromeView: NSView {
         addSubview(toolbar)
         addSubview(separator)
         addSubview(progressIndicator)
+        bookmarkSidebar.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(bookmarkSidebar)
         addSubview(pageContainer)
+        pageLeadingConstraint = pageContainer.leadingAnchor.constraint(
+            equalTo: leadingAnchor, constant: 224
+        )
 
         NSLayoutConstraint.activate([
             tabStrip.topAnchor.constraint(equalTo: topAnchor),
@@ -144,6 +162,7 @@ final class BrowserChromeView: NSView {
             controls.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
 
             backButton.widthAnchor.constraint(equalToConstant: 30),
+            sidebarButton.widthAnchor.constraint(equalToConstant: 30),
             forwardButton.widthAnchor.constraint(equalToConstant: 30),
             reloadStopButton.widthAnchor.constraint(equalToConstant: 30),
             bookmarkButton.widthAnchor.constraint(equalToConstant: 30),
@@ -159,9 +178,14 @@ final class BrowserChromeView: NSView {
             progressIndicator.heightAnchor.constraint(equalToConstant: 2),
 
             pageContainer.topAnchor.constraint(equalTo: progressIndicator.bottomAnchor),
-            pageContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            pageLeadingConstraint,
             pageContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
             pageContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            bookmarkSidebar.topAnchor.constraint(equalTo: progressIndicator.bottomAnchor),
+            bookmarkSidebar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            bookmarkSidebar.bottomAnchor.constraint(equalTo: bottomAnchor),
+            bookmarkSidebar.widthAnchor.constraint(equalToConstant: 224),
 
             errorView.topAnchor.constraint(equalTo: pageContainer.topAnchor),
             errorView.leadingAnchor.constraint(equalTo: pageContainer.leadingAnchor),
@@ -179,6 +203,16 @@ final class BrowserChromeView: NSView {
         addressField.placeholderString = Self.addressPlaceholder(
             searchProviderName: name
         )
+    }
+
+    func setBookmarkSidebarVisible(_ visible: Bool) {
+        isBookmarkSidebarVisible = visible
+        bookmarkSidebar.isHidden = !visible
+        pageLeadingConstraint.constant = visible ? 224 : 0
+        sidebarButton.state = visible ? .on : .off
+        let label = visible ? "Hide Bookmarks Sidebar" : "Show Bookmarks Sidebar"
+        sidebarButton.toolTip = label
+        sidebarButton.setAccessibilityLabel(label)
     }
 
     func updateReloadStopButton(isLoading: Bool) {

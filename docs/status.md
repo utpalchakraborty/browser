@@ -1,6 +1,20 @@
 # Project Status
 
-Last updated: 2026-09-06
+Last updated: 2026-10-20
+
+## Bookmarks sidebar
+
+The left sidebar is implemented and owner accepted. Each bookmark
+occupies one row; a single click opens a new foreground tab. The toolbar toggle
+and View menu remember visibility, and Manage Bookmarks opens the existing
+manager. Local HTML bookmarks obtain a fresh grant for their new tab.
+
+Debug and Release background suites each passed 178 tests, including seven new
+sidebar tests. Production Release package verification passed. Light/dark and
+minimum-size native offscreen renderings were inspected. The owner reported
+"nice looks good" and authorized a local commit on 2026-10-20. Specific manual
+scenarios were not itemized; interactive suites and performance baselines remain
+unrun. See [design and evidence](bookmark-sidebar-design.md).
 
 ## Current audit remediation checkpoint
 

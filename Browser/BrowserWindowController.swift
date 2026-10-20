@@ -35,6 +35,7 @@ final class BrowserWindowController: NSWindowController,
     private let contentBlockingCoordinator: ContentBlockingCoordinator?
     private let externalURLOpener: (URL) -> Bool
     private let localFileAccessAuthorizer: any LocalFileAccessAuthorizing
+    private let preferences: UserDefaults
     private var addressInterpreter: AddressInterpreter
     private var searchProvider: SearchProvider
     private var bookmarkCoordinator: BookmarkCoordinator?
@@ -57,8 +58,10 @@ final class BrowserWindowController: NSWindowController,
         externalURLOpener: @escaping (URL) -> Bool = {
             NSWorkspace.shared.open($0)
         },
-        localFileAccessAuthorizer: (any LocalFileAccessAuthorizing)? = nil
+        localFileAccessAuthorizer: (any LocalFileAccessAuthorizing)? = nil,
+        preferences: UserDefaults = BrowserLaunchConfiguration.current.defaults
     ) {
+        self.preferences = preferences
         self.searchProvider = searchProvider
         self.contentBlockingCoordinator = contentBlockingCoordinator
         self.externalURLOpener = externalURLOpener
@@ -110,6 +113,17 @@ final class BrowserWindowController: NSWindowController,
         chromeView.reloadStopButton.action = #selector(reloadOrStop(_:))
         chromeView.bookmarkButton.target = self
         chromeView.bookmarkButton.action = #selector(bookmarkCurrentPage(_:))
+        chromeView.sidebarButton.target = self
+        chromeView.sidebarButton.action = #selector(toggleBookmarkSidebar(_:))
+        chromeView.setBookmarkSidebarVisible(
+            BrowserPreferences.bookmarkSidebarVisible(in: preferences)
+        )
+        chromeView.bookmarkSidebar.onOpen = { [weak self] bookmark in
+            self?.openBookmarkInNewTab(bookmark.url)
+        }
+        chromeView.bookmarkSidebar.onManage = { [weak self] in
+            self?.showBookmarks(nil)
+        }
         chromeView.errorView.retryButton.target = self
         chromeView.errorView.retryButton.action = #selector(retryNavigation(_:))
         chromeView.tabStrip.onNewTab = { [weak self] in
@@ -278,6 +292,19 @@ final class BrowserWindowController: NSWindowController,
         }
     }
 
+    func openBookmarkInNewTab(_ url: URL) {
+        guard let canonicalURL = try? Bookmark.canonicalURL(for: url) else {
+            NSSound.beep()
+            return
+        }
+        if canonicalURL.isFileURL {
+            newTab(nil)
+            openLocalFile(canonicalURL)
+        } else {
+            openTab(request: URLRequest(url: canonicalURL), disposition: .foregroundTab)
+        }
+    }
+
     @objc
     func focusAddressField(_ sender: Any? = nil) {
         guard let window else {
@@ -410,6 +437,9 @@ final class BrowserWindowController: NSWindowController,
 
         let selectsNewTab = disposition == .foregroundTab
         let tab = makeTab()
+        if selectsNewTab {
+            prepareForSelectedTabChange()
+        }
         tabManager.append(tab, select: selectsNewTab)
         _ = tab.loadInBackground(request)
         if selectsNewTab {
@@ -613,6 +643,19 @@ final class BrowserWindowController: NSWindowController,
     }
 
     @objc
+    func toggleBookmarkSidebar(_ sender: Any?) {
+        let visible = !chromeView.isBookmarkSidebarVisible
+        if !visible,
+           let responder = window?.firstResponder as? NSView,
+           responder.isDescendant(of: chromeView.bookmarkSidebar)
+        {
+            focusSelectedTabContent()
+        }
+        chromeView.setBookmarkSidebarVisible(visible)
+        BrowserPreferences.setBookmarkSidebarVisible(visible, in: preferences)
+    }
+
+    @objc
     func showBookmarks(_ sender: Any?) {
         guard bookmarkCoordinator != nil else {
             return
@@ -762,6 +805,10 @@ final class BrowserWindowController: NSWindowController,
                 && currentBookmarkPageCandidate != nil
         case #selector(showBookmarks(_:)):
             return bookmarkCoordinator != nil
+        case #selector(toggleBookmarkSidebar(_:)):
+            menuItem.title = chromeView.isBookmarkSidebarVisible
+                ? "Hide Bookmarks Sidebar" : "Show Bookmarks Sidebar"
+            return true
         case #selector(showWebsiteData(_:)):
             return websiteDataController != nil
         case #selector(contentBlockingStatus(_:)):
@@ -1127,6 +1174,7 @@ final class BrowserWindowController: NSWindowController,
     private func bookmarkStateDidChange(_ state: BookmarkCoordinator.State) {
         renderBookmarkState()
         renderBookmarkManager()
+        chromeView.bookmarkSidebar.update(state: state, canManage: true)
     }
 
     private func renderBookmarkState() {

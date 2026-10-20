@@ -63,6 +63,7 @@
                <Test Identifier = "AddressSubmissionTests" />
                <Test Identifier = "AppDelegateContentBlockingTests" />
                <Test Identifier = "BookmarkIntegrationTests" />
+               <Test Identifier = "BookmarkSidebarTests" />
                <Test Identifier = "BookmarkRepositoryTests" />
                <Test Identifier = "BookmarkTests" />
                <Test Identifier = "BrowserLaunchConfigurationTests" />

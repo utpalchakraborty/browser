@@ -6,10 +6,11 @@ application-owned browsing history, sends no application-owned telemetry, and
 includes no third-party runtime dependencies. Startup, CPU, and memory budgets
 are release gates.
 
-Phase 3 adds explicit, local bookmarks: use the toolbar star or Command-D to add
-or edit the selected tab's web or local HTML page, and use the searchable
-Bookmarks manager to add, edit, delete, or open saved pages. Opening a bookmark
-navigates the selected tab.
+Use the toolbar star or Command-D to add or edit the selected tab's web or local
+HTML page. The left bookmarks sidebar shows one saved page per row; a single
+click opens it in a new foreground tab. The toolbar sidebar button or View menu
+hides/shows the sidebar and remembers your choice. Manage Bookmarks opens the
+searchable editor; opening a bookmark from that manager navigates the selected tab.
 
 This is now a usable native multi-tab pilot, not yet the daily-driver release.
 It remembers the main window's size and location across relaunch while still
@@ -156,6 +157,10 @@ scripts, styles, and sibling pages can load.
 - Command-period stops an active load.
 - Command-D adds the current page as a bookmark, or edits it if already saved.
 - Option-Command-B opens the searchable Bookmarks manager.
+- Click a sidebar bookmark to open it in a new tab. Arrow keys select a row;
+  Return opens it. Hover over a truncated title to see its full title and URL.
+- Use the leftmost toolbar button or View > Hide/Show Bookmarks Sidebar to
+  toggle the sidebar. Its visibility is remembered across launches.
 - Option-Command-Y opens the Website Data privacy window.
 - Privacy shows whether ad and tracker blocking is active for the current site.
 - Option-Command-P disables or enables blocking for the current exact host and
@@ -177,9 +182,10 @@ Blocking materially reduces common advertising and tracking requests; it does
 not promise anonymity or eliminate first-party analytics, fingerprinting, CNAME
 cloaking, or trackers introduced after the pinned lists were generated.
 
-Bookmarks intentionally use a flat searchable manager rather than a persistent
-bookmarks bar. Folder hierarchy is deferred until ordinary use demonstrates a
-real need for it.
+Bookmarks use a flat sidebar and a searchable manager. Both update when the
+library changes. Folder hierarchy is deferred until ordinary use demonstrates a
+real need for it. Local HTML bookmarks opened in a new tab request that tab's
+own folder permission.
 
 Browser does not permit a page to create a secondary app window, another
 WKWebView, or a tab-under on its own. Scripted `window.open` requests and forms

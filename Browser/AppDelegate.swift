@@ -453,6 +453,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         addMenu(editMenu, to: mainMenu)
 
         let viewMenu = NSMenu(title: "View")
+        let sidebarItem = viewMenu.addItem(
+            withTitle: "Hide Bookmarks Sidebar",
+            action: #selector(BrowserWindowController.toggleBookmarkSidebar(_:)),
+            keyEquivalent: ""
+        )
+        sidebarItem.target = navigationTarget
+        viewMenu.addItem(.separator())
         let zoomInItem = viewMenu.addItem(
             withTitle: "Zoom In",
             action: #selector(BrowserWindowController.zoomIn(_:)),
