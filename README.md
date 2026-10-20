@@ -126,11 +126,13 @@ second half. Raw artifact paths are recorded in
 ## Use
 
 ~~~sh
-make run
+make run                            # build and launch Release
+make run-release                    # launch the existing Release build without rebuilding
 ~~~
 
-This builds the Release configuration and opens
-`.build/DerivedData/Build/Products/Release/Browser.app`. Enter an explicit HTTP
+Both commands open `.build/DerivedData/Build/Products/Release/Browser.app`.
+`make run` builds the Release configuration first; `make run-release` requires
+an existing Release build (create one with `make release`). Enter an explicit HTTP
 or HTTPS URL, a plausible hostname such as `example.com`, or search text in the
 address field and press Return. You can also paste an absolute `.html` or `.htm`
 path such as `/Users/example/site/index.html`, or its `file:///` URL. Browser
