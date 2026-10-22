@@ -19,6 +19,7 @@ never approve its own assets.
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -33,6 +34,9 @@ MANIFEST = RULES / 'ContentBlockerManifest.json'
 CONVERTER_REPOSITORY = 'https://github.com/AdguardTeam/SafariConverterLib.git'
 REGISTRY_RAW = 'https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry'
 COMMIT = re.compile(r'^[0-9a-f]{40}$')
+# Swift seeds hashing per process, so the converter otherwise emits rules in a
+# different order on every run. Deterministic hashing makes output reproducible.
+CONVERTER_ENVIRONMENT = {'SWIFT_DETERMINISTIC_HASHING': '1'}
 
 
 def sha256(path):
@@ -63,6 +67,21 @@ def build_converter(converter, work):
     run(['/usr/bin/xcrun', 'swift', 'build', '--package-path', checkout,
          '--configuration', 'release', '--product', 'ConverterTool'])
     return checkout / '.build' / 'release' / 'ConverterTool'
+
+
+def ordering_segments(path):
+    """Rules grouped between `ignore-previous-rules` actions, the only WebKit
+    action whose effect depends on order. Order within a segment is irrelevant."""
+    segments, current = [], {}
+    for rule in json.loads(path.read_text(encoding='utf-8')):
+        key = json.dumps(rule, sort_keys=True)
+        if rule.get('action', {}).get('type') == 'ignore-previous-rules':
+            segments.append((current, key))
+            current = {}
+        else:
+            current[key] = current.get(key, 0) + 1
+    segments.append((current, None))
+    return segments
 
 
 def header_value(source, name):
@@ -112,17 +131,26 @@ def main(arguments):
                 continue
 
             output = work / f'{rule_set["resource"]}.{rule_set["file_extension"]}'
-            run([tool, *converter['arguments'], '--input-path', source, '--safari-rules-json-path', output])
+            environment = dict(os.environ, **converter.get('environment', CONVERTER_ENVIRONMENT))
+            run([tool, *converter['arguments'], '--input-path', source, '--safari-rules-json-path', output],
+                env=environment)
             output_sha256 = sha256(output)
             rule_count = len(json.loads(output.read_text(encoding='utf-8')))
 
             if not options.registry_commit:
-                if output_sha256 != rule_set['sha256'] or rule_count != rule_set['rule_count']:
+                bundled = RULES / output.name
+                if output_sha256 == rule_set['sha256'] and rule_count == rule_set['rule_count']:
+                    print(f'Reproduced {rule_set["display_name"]} byte-for-byte: {output_sha256}')
+                elif (sha256(bundled) == rule_set['sha256']
+                      and ordering_segments(output) == ordering_segments(bundled)):
+                    # Bundles converted before deterministic hashing have an
+                    # arbitrary order within segments; their effect is identical.
+                    print(f'Reproduced {rule_set["display_name"]} equivalently: same {rule_count} rules and '
+                          'ignore-previous-rules sequence; order differs only within segments.')
+                else:
                     mismatches.append(
                         f'{rule_set["display_name"]}: output {output_sha256} ({rule_count} rules) '
                         f'!= bundled {rule_set["sha256"]} ({rule_set["rule_count"]} rules)')
-                else:
-                    print(f'Reproduced {rule_set["display_name"]}: {output_sha256}')
                 continue
 
             shutil.copyfile(output, RULES / output.name)
@@ -144,6 +172,7 @@ def main(arguments):
             print('\n'.join(['Rules did not reproduce:', *mismatches]), file=sys.stderr)
             return 1
         if options.registry_commit:
+            converter.setdefault('environment', CONVERTER_ENVIRONMENT)
             MANIFEST.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
             print(f'\nWrote {MANIFEST.relative_to(ROOT)} (sha256 {sha256(MANIFEST)}).')
             print('Next: pin that digest in scripts/verify-release.sh, review the diff, then run '

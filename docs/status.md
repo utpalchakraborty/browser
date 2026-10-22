@@ -4,7 +4,7 @@ Last updated: 2026-10-22
 
 ## 2026-10-22 audit remediation
 
-[Codebase review 2026-10-22](codebase-review-2026-10-22.md) found 14 issues. The owner accepted HTTPS-only loading beyond local addresses (IN-01) and the current dotted-search behavior (BE-01). The owner asked for the rest except the cookie-identity issue (FE-01, still open). What changed:
+[Codebase review 2026-10-22](codebase-review-2026-10-22.md) found 14 issues. The owner accepted HTTPS-only loading beyond local addresses (IN-01) and the current dotted-search behavior (BE-01). The owner also accepted the same-name host-only/domain cookie edge case (FE-01) and asked for the rest. What changed:
 
 - Same-document navigation (`pushState`, Back/Forward between history entries, repeated anchor clicks) no longer leaves a tab "navigating", which had disabled the site-blocking toggle.
 - Page shortcuts no longer act on the hidden browser window while Bookmarks or Privacy is key.
@@ -16,7 +16,7 @@ Last updated: 2026-10-22
 - Runners cancel on terminal hangup and time out silent fixtures.
 - The release gate parses hardened-runtime flags exactly.
 
-`make check` passed. Debug and Release background suites each ran **194 tests with zero failures**, and the production Release package verified. All ten new regression tests fail with their fixes neutralized. Interactive suites, a live context-menu check, and a real-converter rule reproduction were not run.
+`make check` passed. Debug and Release background suites each ran **194 tests with zero failures**, and the production Release package verified. All ten new regression tests fail with their fixes neutralized. A real AdGuard converter rebuild produced equivalent rules: the same rules with the same `ignore-previous-rules` order; the converter's ordering is hash-seeded, so the script now runs it deterministically. Interactive suites and a live context-menu check were not run.
 
 ## Bookmarks sidebar
 

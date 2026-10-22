@@ -1,6 +1,6 @@
 # Browser codebase review — 2026-10-22
 
-Status: Audit pass complete; remediation implemented and verified on 2026-10-22 (see the remediation update at the end). Of 14 findings, 10 are fixed, 2 are owner-accepted as-is (IN-01, BE-01), and BE-03 was reassessed as intended design. FE-01 remains open pending the owner's decision.
+Status: Audit pass complete; remediation implemented and verified on 2026-10-22 (see the remediation update at the end). Of 14 findings, 10 are fixed, 3 are owner-accepted as-is (IN-01, BE-01, FE-01), and BE-03 was reassessed as intended design. None remain open.
 
 Audit baseline: branch `main`, commit `fe477853d671783a357a0dad4b3416d0f5e1407d` ("Add manual WebKit connection reset for VPN recovery"). The working tree was clean at audit start. Source references describe this baseline unless a dated update says otherwise. No applicable AGENTS.md exists in the project or its parent.
 
@@ -42,7 +42,7 @@ Originally proposed only. On 2026-10-22 the owner authorized G02 and all P3 item
 | --- | --- | --- | --- | --- |
 | G01 | Plain-HTTP sites load; the packaged app proves it | IN-01 | None | Not pursued: owner accepted HTTPS-only behavior |
 | G02 | Same-document history navigation never leaves a tab "navigating" | BE-02 | None | Implemented, verified |
-| G03 | Cookie rows have exact identity; Privacy busy state is single-sourced | FE-01, FE-02, FE-05 (Privacy search portion) | None | FE-02 and FE-05 portion implemented; FE-01 awaiting decision |
+| G03 | Cookie rows have exact identity; Privacy busy state is single-sourced | FE-01, FE-02, FE-05 (Privacy search portion) | None | FE-02 and FE-05 portion implemented; FE-01 accepted as-is |
 | G04 | Ambiguous dotted input reaches search | BE-01 | Decision below | Not pursued: owner accepted current behavior |
 | G05 | Commands and context-menu items act on the context that shows them | FE-03, FE-04 | None (interactive check for FE-04) | Implemented, verified (live right-click pending) |
 | G06 | Persisted-state and maintenance hygiene | BE-03, IN-02, FE-05 (remaining portions) | None | Implemented (BE-03 reassessed; real-converter run pending) |
@@ -140,7 +140,7 @@ Verify: seed `[valid, invalid]`; the valid host stays excepted, and a toggle pre
 
 ### FE-01 — A host-only cookie and a same-name domain cookie share one identity; selecting, revealing, and deleting act on the wrong cookie (P2, Confirmed (reproduced))
 
-Status: Open. Not included in the owner's 2026-10-22 remediation request; awaiting a decision.
+Status: Accepted as-is by the owner on 2026-10-22 ("I am ok with same name cookies. That is a real edge case."). No change.
 
 Evidence: `Browser/WebsiteDataSnapshot.swift:4–36` builds `WebsiteCookieID` from `normalizedDomain`, which strips leading dots, so `example.com` (host-only) and `.example.com` (domain) with the same name and path are equal. Both become rows of one group with the same ID (`:215–223`, sorted domain-first by `cookieSort`). `selectedCookie` resolves through `snapshot.cookie(id:)`, which returns the first match (`Browser/WebsiteDataPrivacyWindowController.swift:938–950`, `WebsiteDataSnapshot.swift:247–251`). Delete Cookie promises "Only this cookie for <domain> will be deleted" (`WebsiteDataPrivacyWindowController.swift:550–561`), but `WebsiteDataController.deleteCookie(withID:)` deletes every cookie with that ID and reports success (`Browser/WebsiteDataController.swift:32–57`). `BrowserTests/WebsiteDataSnapshotTests.swift:34–48` asserts the collapse as intended behavior.
 
@@ -375,11 +375,12 @@ All commands ran from `/Users/utpalrohan/code/browser` in the isolated, nonactiv
 | `scripts/check-test-selection.py` | Real tree passes; a fixture with an orphan class, a duplicate, and a stale name fails with all three messages | Scratch copy |
 | Hardened-runtime gate | Real Release app passes. An ad-hoc bundle without runtime under `runtime-x/` passes the *old* check and fails the new one | Scratch bundle |
 | `BROWSER_BUILD_JOBS={64,0,two,"2 3",""} make -n check` | Each stops before any xcodebuild command; `3` passes through | Dry runs |
-| `scripts/update-blocker-rules.py --converter <stand-in>` | Both pinned FiltersRegistry sources downloaded and matched their recorded SHA-256. Identity stand-in → "reproduce", exit 0; wrong output → exit 1 with both mismatches. Rule files unchanged | **The real AdGuard converter was not built or run** (needs approval to fetch and execute third-party code) |
+| `scripts/update-blocker-rules.py --converter <stand-in>` | Both pinned FiltersRegistry sources downloaded and matched their recorded SHA-256. Identity stand-in → "reproduce", exit 0; wrong output → exit 1 with both mismatches. Rule files unchanged | Script mechanics only |
+| `scripts/update-blocker-rules.py --verify` with the real converter (owner-approved; SafariConverterLib `7a2e93f` / v4.3.0 built with Swift 6.4) | First run: not byte-identical, but the same rules, rule counts, and byte lengths. Two plain runs of the converter gave two different hashes; two runs with `SWIFT_DETERMINISTIC_HASHING=1` gave identical output. The converter's order depends on Swift's per-process hash seed, so the bundled bytes cannot be reproduced exactly. Both lists match on the order-sensitive check: identical `ignore-previous-rules` sequences (6,041 and 2,579) and identical rule sets between them. The script now runs the converter deterministically and accepts an older bundle only by that check. Rerun: exit 0 for both lists | The binary hash differs from the recorded one (expected across toolchains). Rule files unchanged |
 | `sh -n`, Python AST parse, `test-audit-container.sh`, `git diff --check` | Pass | Syntax and fixtures |
 
 Not verified: the interactive AppKit/XCUI and performance suites; a live right-click in the packaged app (FE-04); packaged-app manual smoke of the changed shortcuts. The test-host hygiene count comes from in-process WebKit APIs, not from inspecting the container.
 
 ### Current status
 
-Supersedes the "Continuation checkpoint" above. Twelve of fourteen findings are resolved: 10 implemented, and 2 owner-accepted as-is (IN-01, BE-01). BE-03's behavior change was withdrawn with a guard test added. FE-01 (P2 cookie identity) remains open pending the owner's decision. Remaining verification: a real-converter `--verify` run, the live context-menu check, and the interactive suites.
+Supersedes the "Continuation checkpoint" above. All fourteen findings are resolved: 10 implemented, and 3 owner-accepted as-is (IN-01, BE-01, FE-01). BE-03's behavior change was withdrawn with a guard test added. Remaining verification: the live context-menu check and the interactive suites. The real-converter check passed on 2026-10-22 (equivalent rules; see the table).

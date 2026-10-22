@@ -221,10 +221,13 @@ rules. Browser never downloads or silently updates a filter list. After a
 bundled-rule update compiles, the superseded compiled lists are deleted.
 
 Rule updates are a developer step: `scripts/update-blocker-rules.py` (network
-required; never run by the app or `make check`) reproduces the bundled files
-byte-for-byte from the manifest's recorded sources and pinned converter, or
-with `--registry-commit <sha>` regenerates them from a newer FiltersRegistry
-commit and rewrites the manifest. The release verifier's pinned manifest digest
+required; never run by the app or `make check`) rebuilds the pinned AdGuard
+converter and checks the bundled files against the manifest's recorded
+sources, or with `--registry-commit <sha>` regenerates them from a newer
+FiltersRegistry commit and rewrites the manifest. The converter runs with
+deterministic Swift hashing so new output is byte-reproducible. The current
+files predate that, so they are checked for the same rules and the same
+`ignore-previous-rules` order, the only ordering WebKit depends on. The release verifier's pinned manifest digest
 must then be updated by hand.
 
 Blocking materially reduces common advertising and tracking requests; it does
