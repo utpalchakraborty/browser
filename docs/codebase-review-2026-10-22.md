@@ -18,7 +18,7 @@ Evidence: confirmed (source), confirmed (reproduced), risk, or debt. Priority: P
 
 ## Review map
 
-Fourteen findings: **3 core, 5 native presentation, 6 integration/project**. Priority: **1 P1, 3 P2, 10 P3**. Evidence: **4 Confirmed (reproduced)** (BE-01, BE-02, FE-01, IN-01), **4 Confirmed (source)** (FE-02, FE-03, IN-04, IN-05), **2 Risk** (BE-03, FE-04), **4 Debt** (FE-05, IN-02, IN-03, IN-06). All open. This is a completed review pass, not a claim that every defect has been found.
+Fourteen findings: **3 core, 5 native presentation, 6 integration/project**. Priority: **1 P1, 3 P2, 10 P3**. Evidence: **4 Confirmed (reproduced)** (BE-01, BE-02, FE-01, IN-01), **4 Confirmed (source)** (FE-02, FE-03, IN-04, IN-05), **2 Risk** (BE-03, FE-04), **4 Debt** (FE-05, IN-02, IN-03, IN-06). These counts describe the original audit; all findings were later resolved (see Current status). This is a completed review pass, not a claim that every defect has been found.
 
 | Discussion area | Findings | Why it matters |
 | --- | --- | --- |
@@ -327,7 +327,7 @@ Task-authored repository changes: this report only. Disposable probes, their sou
 
 ## Remediation update — 2026-10-22 (current checkpoint)
 
-Owner direction (2026-10-22): "I think it not loading a http beyond the local is good. We probably should never load a http. 2. is ok. 3. We should fix yes fix the 10 smaller items. especially deleting the old tests." Interpreted as follows: IN-01 is accepted as intended behavior; BE-01 is accepted as-is; fix BE-02 and every P3 (BE-03, FE-02–FE-05, IN-02–IN-06), starting with test-artifact cleanup. FE-01 (P2 cookie identity) was not mentioned and remains open pending a decision. Work is uncommitted on `main`, on top of `fe47785`.
+Owner direction (2026-10-22): "I think it not loading a http beyond the local is good. We probably should never load a http. 2. is ok. 3. We should fix yes fix the 10 smaller items. especially deleting the old tests." Interpreted as follows: IN-01 is accepted as intended behavior; BE-01 is accepted as-is; fix BE-02 and every P3 (BE-03, FE-02–FE-05, IN-02–IN-06), starting with test-artifact cleanup. FE-01 (P2 cookie identity) was not mentioned at first; the owner later accepted it as an edge case. Committed and pushed on `main` as `6df8383` and `a07163f`.
 
 ### Implemented behavior
 
