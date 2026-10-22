@@ -84,6 +84,7 @@
                <Test Identifier = "TabManagerTests" />
                <Test Identifier = "FailedDocumentRecoveryTests" />
                <Test Identifier = "WebKitEdgeCaseTests" />
+               <Test Identifier = "WebKitConnectionResetTests" />
                <Test Identifier = "WebsiteDataControllerTests" />
                <Test Identifier = "WebsiteDataSnapshotTests" />
             </SelectedTests>

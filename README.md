@@ -53,6 +53,36 @@ run remains the Phase 4 release gate. Later outer XCTest launch medians were
 bimodal and are documented transparently in the performance baseline; app-owned
 window presentation remained about 93 ms.
 
+## VPN connection-reset experiment
+
+If every tab becomes slow after connecting or disconnecting a VPN, choose
+**Navigate → Reset WebKit Connections (Experimental)**, then retry the stalled
+address (or reload the page). This interrupts network activity across Browser's
+tabs without closing or automatically reloading them. Saved cookies and local
+storage stay in the existing profile. **Session-only cookies and sessionStorage
+can be lost, so some sites may sign you out.** Streams, WebSockets, and other
+active requests are interrupted and may need a page reload. Unsaved storage
+writes may also be lost when the network process stops.
+
+Requests still queued while a new tab starts may proceed through the fresh
+network process. If a page is still loading, you can submit its address again;
+the reset command does not wait for or automatically retry navigation.
+
+This personal-use diagnostic invokes WebKit's private
+`WKWebsiteDataStore._terminateNetworkProcess` hook, guarded by runtime
+availability and signature checks. The command is disabled if unsupported.
+It is not an App Store-compatible API. The user confirmed recovery from the
+VPN slowdown with this command on 2026-10-22; it remains an experimental
+workaround, and the underlying cause is not established.
+The next request can start a fresh network process; the existing profile stays
+in use. See [WebKit's implementation](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/API/Cocoa/WKWebsiteDataStore.mm).
+
+To test: launch the updated app, toggle ExpressVPN, confirm the slowdown, use
+the reset command, and retry the same address without restarting Browser.
+Repeat for the opposite VPN transition. Recovery would support a problem with
+WebKit's process-local networking state, but would not distinguish DNS state
+from cached connections or routing state.
+
 ## Requirements
 
 - Apple silicon Mac running macOS 26 or later

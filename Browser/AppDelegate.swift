@@ -513,6 +513,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             keyEquivalent: "."
         )
         stopItem.target = navigationTarget
+        navigationMenu.addItem(.separator())
+        navigationMenu.addItem(navigationTarget.makeConnectionResetMenuItem())
 
         let searchProviderItem = NSMenuItem(title: "Search Provider", action: nil, keyEquivalent: "")
         let searchProviderMenu = NSMenu(title: "Search Provider")

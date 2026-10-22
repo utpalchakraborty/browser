@@ -624,6 +624,35 @@ final class BrowserWindowController: NSWindowController,
         }
     }
 
+    func makeConnectionResetMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(
+            title: "Reset WebKit Connections (Experimental)",
+            action: #selector(resetWebKitConnections(_:)),
+            keyEquivalent: ""
+        )
+        item.target = self
+        item.toolTip = "Interrupts networking in all tabs and may sign you out of session-only logins. Then reload or retry the page. Saved website data is retained."
+        return item
+    }
+
+    @objc
+    func resetWebKitConnections(_ sender: Any?) {
+        guard
+            let profile,
+            WebKitConnectionReset.isSupported(in: profile.websiteDataStore)
+        else {
+            NSSound.beep()
+            return
+        }
+        // Let WebKit fail active requests when its network process exits.
+        // Calling stopLoading first can strand an initial navigation before
+        // its WebContent process is ready, leaving isLoading stuck at true.
+        // Requests still queued at startup may use the new network process.
+        WebKitConnectionReset.reset(in: profile.websiteDataStore)
+        // Leave loaded documents and tab history in place. In particular, do
+        // not automatically replay a form submission or reload background tabs.
+    }
+
     @objc
     func bookmarkCurrentPage(_ sender: Any?) {
         guard
@@ -791,6 +820,10 @@ final class BrowserWindowController: NSWindowController,
             return webView != nil && webView?.isLoading == false
         case #selector(stopLoading(_:)):
             return webView?.isLoading == true
+        case #selector(resetWebKitConnections(_:)):
+            return profile.map {
+                WebKitConnectionReset.isSupported(in: $0.websiteDataStore)
+            } ?? false
         case #selector(zoomIn(_:)):
             return webView.map { PageZoom.canIncrease($0.pageZoom) } ?? false
         case #selector(zoomOut(_:)):
