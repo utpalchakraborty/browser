@@ -70,6 +70,7 @@ fi
 
 mkdir -p "$project_root/.build"
 output_directory=$(mktemp -d "$project_root/.build/NetworkAudit.XXXXXX")
+"$project_root/scripts/prune-results.sh" NetworkAudit
 fixture_token=${output_directory##*.}
 fixture_pid=""
 browser_pid=""
@@ -400,7 +401,7 @@ fixture_url="http://127.0.0.1:$fixture_port/normal/"
 fixture_pid=$!
 
 attempt=0
-until /usr/bin/curl --fail --silent --show-error \
+until /usr/bin/curl --fail --silent --connect-timeout 1 --max-time 2 --show-error \
     "http://127.0.0.1:$fixture_port/health?token=$fixture_token" \
     >/dev/null 2>&1
 do
@@ -411,7 +412,7 @@ do
     fi
     sleep 0.1
 done
-/usr/bin/curl --fail --silent --show-error \
+/usr/bin/curl --fail --silent --connect-timeout 1 --max-time 2 --show-error \
     "http://127.0.0.1:$fixture_port/reset" >/dev/null
 
 echo "Validating process attribution with an intentional localhost load..."
@@ -424,7 +425,7 @@ launch_browser \
 
 attempt=0
 while [ "$attempt" -lt 100 ]; do
-    if /usr/bin/curl --fail --silent --show-error \
+    if /usr/bin/curl --fail --silent --connect-timeout 1 --max-time 2 --show-error \
         "http://127.0.0.1:$fixture_port/stats" \
         >"$output_directory/control.fixture-stats.json" && \
         /usr/bin/python3 -c \

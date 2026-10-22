@@ -178,6 +178,7 @@ done
 
 mkdir -p "$project_root/.build"
 output_directory=$(mktemp -d "$project_root/.build/WebContentTermination.XXXXXX")
+"$project_root/scripts/prune-results.sh" WebContentTermination
 before_snapshot="$output_directory/webcontent-before.tsv"
 discovery_snapshot="$output_directory/webcontent-discovery.tsv"
 post_signal_snapshot="$output_directory/webcontent-post-signal.tsv"

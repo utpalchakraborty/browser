@@ -46,8 +46,9 @@ def main():
             if child is not None:
                 signal_group(child.pid, signal.SIGTERM)
 
-        signal.signal(signal.SIGINT, cancel)
-        signal.signal(signal.SIGTERM, cancel)
+        # Closing the terminal sends SIGHUP; cancel the detached run instead of orphaning it.
+        for cancel_signal in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT):
+            signal.signal(cancel_signal, cancel)
         # Background work yields to the desktop. Explicit interactive timing gates
         # retain the caller's priority so baseline comparisons do not change priority.
         interactive_performance = (

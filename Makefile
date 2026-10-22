@@ -5,12 +5,19 @@ SCHEME := Browser
 DERIVED_DATA := .build/DerivedData
 BROWSER_BUILD_JOBS ?= 2
 export BROWSER_BUILD_JOBS
+# Validate before any recipe starts an unbounded build.
+ifneq ($(words $(BROWSER_BUILD_JOBS)),1)
+$(error BROWSER_BUILD_JOBS must be an integer from 1 to 8)
+endif
+ifeq ($(filter $(BROWSER_BUILD_JOBS),1 2 3 4 5 6 7 8),)
+$(error BROWSER_BUILD_JOBS must be an integer from 1 to 8)
+endif
 
 DESTINATION := platform=macOS,arch=arm64
 
 .PHONY: build release run run-release verify-release test release-test ui-test performance-build performance \
 	interactive-test bookmark-benchmark profile-probe blocker-benchmark resource-one resource-ten network-audit \
-	container-audit container-audit-test webcontent-termination check clean help
+	container-audit container-audit-test webcontent-termination check clean clean-results help
 
 build: ## Build the Debug app (default target).
 	nice -n 10 xcodebuild -jobs "$(BROWSER_BUILD_JOBS)" \
@@ -103,6 +110,12 @@ clean: ## Clean Xcode build products.
 		-scheme "$(SCHEME)" \
 		-derivedDataPath "$(DERIVED_DATA)" \
 		clean
+
+clean-results: ## Keep only the newest BROWSER_KEEP_RESULTS (default 3) run-result directories of each kind.
+	@for kind in TestResults PerformanceResults NetworkAudit ResourceBaseline.v1 ResourceBaseline.v10 \
+		WebContentTermination ActualAppProfileProbe; do \
+		./scripts/prune-results.sh "$$kind" || exit 1; \
+	done
 
 # Keep target descriptions in the ## comments above so help stays with each recipe.
 help: ## List all targets and what they do.

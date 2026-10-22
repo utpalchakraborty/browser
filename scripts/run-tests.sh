@@ -21,7 +21,9 @@ for argument in "$@"; do
     esac
 done
 if [ "$selection_count" -gt 1 ]; then echo "Choose only one test mode." >&2; exit 2; fi
+/usr/bin/python3 -I "$project_root/scripts/check-test-selection.py" "$project_root"
 result_directory=$(mktemp -d "$project_root/.build/TestResults.XXXXXX")
+"$project_root/scripts/prune-results.sh" TestResults
 echo "Verification: $mode; $configuration; ${BROWSER_BUILD_JOBS} build jobs, serial tests. Artifacts: $result_directory"
 if [ "$mode" = background ]; then
     echo "Deferred: desktop UI, visible-window tests, and performance benchmarks (explicit commands only)."
@@ -36,7 +38,7 @@ if [ "$build_only" -eq 0 ]; then
     trap 'exit 130' INT
     trap 'exit 143' TERM
     attempt=0
-    until /usr/bin/curl --fail --silent "http://127.0.0.1:18765/health?token=${result_directory##*.}" >/dev/null; do
+    until /usr/bin/curl --fail --silent --connect-timeout 1 --max-time 2 "http://127.0.0.1:18765/health?token=${result_directory##*.}" >/dev/null; do
         attempt=$((attempt + 1))
         if [ "$attempt" -ge 50 ]; then echo "Fixture unavailable: $fixture_log" >&2; exit 1; fi
         sleep 0.1

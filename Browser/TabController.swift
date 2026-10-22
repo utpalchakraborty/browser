@@ -395,6 +395,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
         observations.removeAll()
         if let webView {
             (webView as? BrowserWebView)?.onOpenSelectedURL = nil
+            (webView as? BrowserWebView)?.onOpenLinkInNewTab = nil
             webView.navigationDelegate = nil
             webView.uiDelegate = nil
             webView.stopLoading()
@@ -504,12 +505,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
         switch navigationDecision {
         case .allow:
             if isMainFrame {
-                if ContentBlockingNavigationURL.isFragmentOnlyNavigation(
-                    from: currentDocumentURL
-                        ?? navigationAction.sourceFrame.request.url
-                        ?? webView.url,
-                    to: navigationAction.request.url
-                ) {
+                if isSameDocumentFragmentNavigation(navigationAction, in: webView) {
                     currentDocumentURL = navigationAction.request.url
                     applyContentBlockingPolicyForCommittedPage(
                         mode: contentBlockingNavigationState
@@ -854,6 +850,14 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
             }
             self.onOpenTab?(URLRequest(url: url), .foregroundTab)
         }
+        // Like Command-click, an explicit context-menu request keeps the source tab selected.
+        newWebView.onOpenLinkInNewTab = { [weak self, weak newWebView] url in
+            guard let self, let newWebView,
+                  self.acceptsDelegateCallback(from: newWebView) else {
+                return
+            }
+            self.onOpenTab?(URLRequest(url: url), .backgroundTab)
+        }
         newWebView.setAccessibilityLabel("Web page")
         newWebView.setAccessibilityValue("Loading")
         webView = newWebView
@@ -890,6 +894,7 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
                         return
                     }
                     self.synchronizeObservedState()
+                    self.synchronizeSameDocumentURL()
                 }
             },
             webView.observe(\.title, options: [.initial, .new]) {
@@ -917,6 +922,8 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
                         return
                     }
                     self.synchronizeObservedState()
+                    // API back/forward changes the URL while still loading.
+                    self.synchronizeSameDocumentURL()
                 }
             },
             webView.observe(\.canGoBack, options: [.initial, .new]) {
@@ -953,6 +960,49 @@ final class TabController: NSObject, WKNavigationDelegate, WKUIDelegate {
         observedCanGoBack = webView.canGoBack
         observedCanGoForward = webView.canGoForward
         notifyStateChange()
+    }
+
+    /// `history.pushState`/`replaceState` and traversal between their entries
+    /// change the URL with no provisional or commit callback. Track the live
+    /// document URL for fragment detection, and settle an approved action that
+    /// WebKit completed this way so the tab does not stay "navigating".
+    private func synchronizeSameDocumentURL() {
+        guard
+            let webView,
+            !webView.isLoading,
+            committedURL != nil,
+            let documentURL = currentDocumentURL,
+            let liveURL = webView.url,
+            liveURL != documentURL,
+            ContentBlockingNavigationURL.isSameOrigin(documentURL, liveURL)
+        else {
+            return
+        }
+        currentDocumentURL = liveURL
+        applyContentBlockingPolicyForCommittedPage(
+            mode: contentBlockingNavigationState.resolveSameDocumentNavigation()
+        )
+    }
+
+    /// Reloads and form submissions always load a new document, even when the
+    /// target URL repeats the current fragment.
+    private func isSameDocumentFragmentNavigation(
+        _ navigationAction: WKNavigationAction,
+        in webView: WKWebView
+    ) -> Bool {
+        guard
+            ![.reload, .formSubmitted, .formResubmitted]
+                .contains(navigationAction.navigationType),
+            (navigationAction.request.httpMethod ?? "GET").uppercased() == "GET"
+        else {
+            return false
+        }
+        return ContentBlockingNavigationURL.isFragmentOnlyNavigation(
+            from: currentDocumentURL
+                ?? navigationAction.sourceFrame.request.url
+                ?? webView.url,
+            to: navigationAction.request.url
+        )
     }
 
     private func notifyStateChange() {

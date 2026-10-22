@@ -87,6 +87,10 @@
                <Test Identifier = "WebKitConnectionResetTests" />
                <Test Identifier = "WebsiteDataControllerTests" />
                <Test Identifier = "WebsiteDataSnapshotTests" />
+               <Test Identifier = "SameDocumentNavigationTests" />
+               <Test Identifier = "BrowserCommandRoutingTests" />
+               <Test Identifier = "LinkContextMenuTests" />
+               <Test Identifier = "WebsiteDataStoreHygieneTests" />
             </SelectedTests>
          </TestableReference>
       </Testables>

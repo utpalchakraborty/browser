@@ -64,6 +64,27 @@ class VerificationSessionTests(unittest.TestCase):
         next_run.communicate(timeout=5)
         self.assertEqual(next_run.returncode, 0)
 
+    def testTerminalHangupCancelsTheDetachedRun(self):
+        pid_file = self.root / 'hangup.pid'
+        script = self.root / 'hangup.py'
+        script.write_text('import os, time\nfrom pathlib import Path\n'
+                          f'Path({str(pid_file)!r}).write_text(str(os.getpid()))\n'
+                          'time.sleep(30)\n')
+        run = self.launch(sys.executable, str(script))
+        deadline = time.monotonic() + 5
+        while not pid_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertTrue(pid_file.exists())
+        run.send_signal(signal.SIGHUP)
+        run.communicate(timeout=5)
+        self.assertEqual(run.returncode, 128 + signal.SIGHUP)
+        state = subprocess.run(['/bin/ps', '-p', pid_file.read_text(), '-o', 'stat='],
+                               capture_output=True, text=True).stdout.strip()
+        self.assertTrue(not state or state.startswith('Z'), state)
+        next_run = self.launch('/usr/bin/true')
+        next_run.communicate(timeout=5)
+        self.assertEqual(next_run.returncode, 0)
+
     def testInvalidConcurrencyFailsBeforeCommand(self):
         marker = self.root / 'should-not-exist'
         for jobs in ['0', '9', 'two']:

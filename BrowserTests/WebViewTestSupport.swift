@@ -1,5 +1,7 @@
+import AppKit
 import Foundation
 import WebKit
+@testable import Browser
 
 enum WebViewTestError: Error {
     case loadDidNotStart
@@ -167,5 +169,100 @@ enum Phase1Fixture {
 
     static func url(_ path: String) -> URL {
         URL(string: path, relativeTo: origin)!
+    }
+}
+
+/// Polls on the main actor; WebKit delivers state through KVO and async callbacks.
+@MainActor
+func waitForWebKit(
+    timeout: TimeInterval = 10,
+    _ condition: () -> Bool
+) async throws {
+    let deadline = Date().addingTimeInterval(timeout)
+    while !condition(), Date() < deadline {
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    if !condition() { throw WebViewTestError.loadDidNotStart }
+}
+
+/// A hidden browser window with a prepared, isolated content-blocking
+/// coordinator, rule store, and preferences suite.
+@MainActor
+struct HiddenBlockingBrowser {
+    let controller: BrowserWindowController
+    let coordinator: ContentBlockingCoordinator
+    let defaults: UserDefaults
+    private let suite: String
+    private let ruleDirectory: URL
+
+    var tab: TabController? {
+        controller.webView?.navigationDelegate as? TabController
+    }
+
+    static func make(
+        initialURL: URL,
+        keyWindow: @escaping () -> NSWindow? = { nil }
+    ) async throws -> HiddenBlockingBrowser {
+        let ruleDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HiddenBlockingBrowser.\(UUID())")
+        let suite = "HiddenBlockingBrowser.\(UUID())"
+        guard
+            let store = WKContentRuleListStore(url: ruleDirectory),
+            let defaults = UserDefaults(suiteName: suite)
+        else {
+            throw WebViewTestError.loadDidNotStart
+        }
+        let rules = try ContentBlockerService.probeRules(
+            blockedURLFilter: ".*/privacy/blocked[.]js", exceptionTopURLFilters: []
+        )
+        let namespace = "browser-hidden-fixture-\(UUID())"
+        let coordinator = ContentBlockingCoordinator(
+            resolver: ContentBlockerRuleSetResolver(
+                service: ContentBlockerService(ruleStore: store),
+                stateStore: ContentBlockerStateStore(defaults: defaults)
+            ),
+            sitePolicyStore: ContentBlockerSitePolicyStore(defaults: defaults)
+        )
+        await coordinator.prepare(currentSources: [
+            ContentBlockerRuleSource(
+                namespace: namespace,
+                identifier: ContentBlockerService.versionedIdentifier(
+                    namespace: namespace, encodedRules: rules
+                ),
+                encodedRulesLoader: { rules }
+            )
+        ])
+        let controller = BrowserWindowController(
+            contentBlockingCoordinator: coordinator,
+            preferences: defaults,
+            keyWindow: keyWindow
+        )
+        controller.installWebViews(
+            profile: BrowserProfile(dataStoreIdentifier: UUID()),
+            viewCount: 1,
+            initialURL: initialURL
+        )
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+        return HiddenBlockingBrowser(
+            controller: controller,
+            coordinator: coordinator,
+            defaults: defaults,
+            suite: suite,
+            ruleDirectory: ruleDirectory
+        )
+    }
+
+    func waitForIdlePage(_ url: URL) async throws {
+        try await waitForWebKit {
+            tab?.committedURL == url.absoluteURL
+                && controller.webView?.isLoading == false
+                && tab?.hasActiveNavigation == false
+        }
+    }
+
+    func cleanUp() {
+        controller.window?.close()
+        defaults.removePersistentDomain(forName: suite)
+        try? FileManager.default.removeItem(at: ruleDirectory)
     }
 }

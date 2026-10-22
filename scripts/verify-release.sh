@@ -22,8 +22,13 @@ case "$signature" in
         exit 1
         ;;
 esac
-case "$signature" in
-    *"runtime"*)
+# Read only the CodeDirectory flag names; the full output also contains paths.
+code_directory_flags=$(
+    printf '%s\n' "$signature" \
+        | /usr/bin/sed -n 's/^CodeDirectory .* flags=0x[0-9a-fA-F]*(\([^)]*\)).*/,\1,/p'
+)
+case "$code_directory_flags" in
+    *",runtime,"*)
         ;;
     *)
         echo "Release signature is missing the hardened-runtime flag." >&2

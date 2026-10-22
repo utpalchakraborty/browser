@@ -109,6 +109,47 @@ final class ContentBlockerRuleSetResolverTests: XCTestCase {
         XCTAssertEqual(cached?.identifier, source.identifier)
     }
 
+    func testCompiledUpdateRemovesSupersededListsOnlyInItsNamespaces() async throws {
+        let fixture = try makeFixture()
+        defer { cleanUp(fixture) }
+        let oldRules = try ContentBlockerService.probeRules(
+            blockedURLFilter: ".*/old[.]js", exceptionTopURLFilters: []
+        )
+        let newRules = try ContentBlockerService.probeRules(
+            blockedURLFilter: ".*/new[.]js", exceptionTopURLFilters: []
+        )
+        let oldSource = makeSource(
+            namespace: "updated", rules: oldRules,
+            loader: RuleLoaderProbe(encodedRules: oldRules)
+        )
+        _ = try await fixture.resolver.prepare(currentSources: [oldSource])
+        var unrelated: Set<String> = []
+        for namespace in ["other", "updated-extra"] {
+            let identifier = ContentBlockerService.versionedIdentifier(
+                namespace: namespace, encodedRules: oldRules
+            )
+            _ = try await fixture.service.compileRuleList(identifier: identifier, encodedRules: oldRules)
+            unrelated.insert(identifier)
+        }
+
+        let newSource = makeSource(
+            namespace: "updated", rules: newRules,
+            loader: RuleLoaderProbe(encodedRules: newRules)
+        )
+        let prepared = try await fixture.resolver.prepare(currentSources: [newSource])
+
+        XCTAssertEqual(prepared.origin, .current)
+        let afterUpdate = await fixture.service.availableCachedRuleListIdentifiers()
+        XCTAssertEqual(Set(afterUpdate), unrelated.union([newSource.identifier]))
+        XCTAssertEqual(fixture.stateStore.lastValidIdentifiers(), [newSource.identifier])
+
+        // A cached launch does no cleanup work, even if a stale sibling reappears.
+        _ = try await fixture.service.compileRuleList(identifier: oldSource.identifier, encodedRules: oldRules)
+        _ = try await fixture.resolver.prepare(currentSources: [newSource])
+        let afterCachedLaunch = await fixture.service.availableCachedRuleListIdentifiers()
+        XCTAssertTrue(afterCachedLaunch.contains(oldSource.identifier))
+    }
+
     func testCompileFailureUsesCompleteLastValidRuleSet() async throws {
         let fixture = try makeFixture()
         defer { cleanUp(fixture) }

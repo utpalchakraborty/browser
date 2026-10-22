@@ -60,6 +60,25 @@ final class ContentBlockerSiteTests: XCTestCase {
         XCTAssertNil(ContentBlockerSite(host: "[::1"))
     }
 
+    // The exception store fails closed when any stored host stops round-tripping,
+    // so a normalization change must stay idempotent for every normalized form.
+    func testNormalizedHostsRoundTripUnchanged() throws {
+        for input in [
+            "example.com",
+            "ACCOUNT.EXAMPLE.COM.",
+            "localhost",
+            "127.0.0.1",
+            "[0:0:0:0:0:0:0:1]",
+            "2001:DB8::1",
+            "bücher.example",
+            "xn--bcher-kva.example",
+            "a-b.example",
+        ] {
+            let normalized = try XCTUnwrap(ContentBlockerSite(host: input), input).host
+            XCTAssertEqual(ContentBlockerSite(host: normalized)?.host, normalized, input)
+        }
+    }
+
     func testCodableRequiresTheStoredHostToAlreadyBeNormalized() throws {
         let site = try XCTUnwrap(ContentBlockerSite(host: "EXAMPLE.COM."))
         let encoded = try JSONEncoder().encode(site)

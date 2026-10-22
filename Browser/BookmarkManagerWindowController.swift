@@ -504,7 +504,7 @@ final class BookmarkManagerWindowController: NSWindowController,
         let hasSelection = selectedBookmark != nil
         let currentPage = currentPageProvider?()
         let currentPageIsBookmarked = currentPage.map { candidate in
-            bookmarks.contains { $0.url == candidate.url }
+            bookmarks.contains { Bookmark.refersToSamePage($0.url, candidate.url) }
         } ?? false
         addButton.title = currentPageIsBookmarked
             ? "Edit Current Page…"

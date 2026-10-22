@@ -15,6 +15,9 @@ nonisolated enum ContentBlockingNavigationFailureDisposition: Equatable, Sendabl
 }
 
 nonisolated enum ContentBlockingNavigationURL {
+    /// WebKit navigates within the current document when the target differs only
+    /// by fragment, or repeats the fragment already shown (a second click on the
+    /// same in-page link). Neither case produces provisional or commit callbacks.
     static func isFragmentOnlyNavigation(from sourceURL: URL?, to targetURL: URL?) -> Bool {
         guard
             let sourceURL,
@@ -43,8 +46,15 @@ nonisolated enum ContentBlockingNavigationURL {
         let targetFragment = targetComponents.percentEncodedFragment
         sourceComponents.percentEncodedFragment = nil
         targetComponents.percentEncodedFragment = nil
-        return sourceFragment != targetFragment
+        return (targetFragment != nil || sourceFragment != targetFragment)
             && sourceComponents.string == targetComponents.string
+    }
+
+    /// History API changes can never leave the document's origin.
+    static func isSameOrigin(_ first: URL, _ second: URL) -> Bool {
+        first.scheme?.lowercased() == second.scheme?.lowercased()
+            && first.host?.lowercased() == second.host?.lowercased()
+            && first.port == second.port
     }
 }
 
@@ -186,6 +196,16 @@ nonisolated struct ContentBlockingNavigationState<NavigationID: Hashable> {
         }
         clearLatestAttempt(latestAttemptID)
         return .exact
+    }
+
+    /// WebKit completed the latest attempt without a new document (history API
+    /// traversal or a same-document URL change), so the committed page's policy
+    /// stays as it is.
+    mutating func resolveSameDocumentNavigation() -> ContentBlockingPolicyApplicationMode {
+        if let latestAttemptID {
+            clearLatestAttempt(latestAttemptID)
+        }
+        return .none
     }
 
     mutating func resolveSameDocumentAction() -> ContentBlockingPolicyApplicationMode {

@@ -86,8 +86,11 @@ final class ContentBlockerRuleSetResolver {
         currentSources: [ContentBlockerRuleSource]
     ) async throws -> PreparedContentBlockerRuleSet {
         do {
-            let prepared = try await prepareCurrent(currentSources)
+            let (prepared, didCompile) = try await prepareCurrent(currentSources)
             stateStore.recordLastValidIdentifiers(prepared.identifiers)
+            if didCompile {
+                await removeSupersededArtifacts(keeping: currentSources)
+            }
             return prepared
         } catch {
             guard
@@ -140,9 +143,42 @@ final class ContentBlockerRuleSetResolver {
         )
     }
 
+    /// A compiled rule update leaves earlier lists of the same namespaces
+    /// unreferenced, because the last-valid pointer now names the current set.
+    /// Cached launches skip this, so the common launch path does no extra work.
+    private func removeSupersededArtifacts(
+        keeping sources: [ContentBlockerRuleSource]
+    ) async {
+        let current = Set(sources.map(\.identifier))
+        let namespacePrefixes = Set(sources.map { "\($0.namespace)-" })
+        for identifier in await service.availableCachedRuleListIdentifiers()
+        where !current.contains(identifier)
+            && artifactResetScope.includes(identifier: identifier)
+            && namespacePrefixes.contains(where: {
+                Self.isVersionedIdentifier(identifier, withPrefix: $0)
+            })
+        {
+            try? await service.removeCachedRuleList(identifier: identifier)
+        }
+    }
+
+    /// Matches `versionedIdentifier(namespace:encodedRules:)` exactly, so a
+    /// longer namespace that shares this prefix is never treated as a sibling.
+    private static func isVersionedIdentifier(
+        _ identifier: String,
+        withPrefix prefix: String
+    ) -> Bool {
+        guard identifier.hasPrefix(prefix) else {
+            return false
+        }
+        let fingerprint = identifier.dropFirst(prefix.count)
+        return fingerprint.count == 64
+            && fingerprint.allSatisfy { $0.isHexDigit && !$0.isUppercase }
+    }
+
     private func prepareCurrent(
         _ sources: [ContentBlockerRuleSource]
-    ) async throws -> PreparedContentBlockerRuleSet {
+    ) async throws -> (prepared: PreparedContentBlockerRuleSet, didCompile: Bool) {
         guard !sources.isEmpty else {
             throw ContentBlockerRuleSetResolverError.noCurrentRuleSources
         }
@@ -164,6 +200,7 @@ final class ContentBlockerRuleSetResolver {
 
         var ruleLists = [WKContentRuleList]()
         ruleLists.reserveCapacity(sources.count)
+        var didCompile = false
         for source in sources {
             if let cached = try await service.cachedRuleList(
                 identifier: source.identifier
@@ -193,12 +230,16 @@ final class ContentBlockerRuleSetResolver {
                     encodedRules: encodedRules
                 )
             )
+            didCompile = true
         }
 
-        return PreparedContentBlockerRuleSet(
-            origin: .current,
-            identifiers: sources.map(\.identifier),
-            ruleLists: ruleLists
+        return (
+            PreparedContentBlockerRuleSet(
+                origin: .current,
+                identifiers: sources.map(\.identifier),
+                ruleLists: ruleLists
+            ),
+            didCompile
         )
     }
 

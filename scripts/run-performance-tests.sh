@@ -44,6 +44,7 @@ if [ "$build_only" -eq 1 ]; then
 fi
 
 result_directory=$(mktemp -d "$project_root/.build/PerformanceResults.XXXXXX")
+"$project_root/scripts/prune-results.sh" PerformanceResults
 launch_result_bundle="$result_directory/BrowserLaunchPerformance.xcresult"
 interaction_result_bundle="$result_directory/BrowserInteractionPerformance.xcresult"
 fixture_port=18768
@@ -68,7 +69,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 attempt=0
-until /usr/bin/curl --fail --silent --show-error \
+until /usr/bin/curl --fail --silent --connect-timeout 1 --max-time 2 --show-error \
     "$fixture_origin/health?token=$fixture_token" >/dev/null
 do
     attempt=$((attempt + 1))

@@ -97,12 +97,18 @@ BROWSER_BUILD_JOBS=1 make test       # default is 2 jobs; tests always run seria
 make bookmark-benchmark             # standalone, no app or UI automation
 make blocker-benchmark              # isolated background WebKit benchmark
 make performance-build              # compile interactive tests without launching them
+make clean-results                  # keep only the newest 3 result directories of each kind
 ~~~
 
 Routine checks use a separate `com.utpalchakraborty.browser.testhost` identity
 and a nonactivating host with no startup window or production services.
 The Browser scheme explicitly selects reviewed background test classes. New test
-classes must be reviewed and added to its SelectedTests list. Visible-window
+classes must be reviewed and added to its SelectedTests list (or to the
+BrowserInteractive or BrowserBenchmarks list); every run first checks that each
+`XCTestCase` class is selected by exactly one of these schemes and fails if not.
+Each run keeps only the newest three result directories of its kind under
+`.build/` (`BROWSER_KEEP_RESULTS=n` to change), and the last background test
+removes test-created WebKit profiles from the isolated test host. Visible-window
 AppKit tests, XCUI automation, and timing benchmarks are excluded from routine
 checks; a passing `make check` does not claim those interactive gates passed.
 
@@ -173,6 +179,9 @@ scripts, styles, and sibling pages can load.
 - Command-T creates and selects a fresh blank tab, then focuses the address
   field. The `+` button performs the same action.
 - Click a tab to select it, or use its close control to close it.
+- Right-click a link and choose **Open Link in New Tab** to open it in a
+  background tab, like Command-click. WebKit's new-window and download menu
+  items are removed because Browser does not create page windows or downloads.
 - Highlight a web address in page text, right-click, and choose **Open Selected
   URL in New Tab** to open and select a new tab. Full HTTP(S) addresses and bare
   hostnames such as `example.com/path` work; ordinary text is not searched.
@@ -208,7 +217,15 @@ On a first install or after the bundled rules change, Browser compiles the
 rules locally before permitting remote navigation. The native window remains
 interactive and the latest submitted URL is queued; current measurements put
 this one-time work at roughly 4 to 7 seconds. Cached launches reuse the compiled
-rules. Browser never downloads or silently updates a filter list.
+rules. Browser never downloads or silently updates a filter list. After a
+bundled-rule update compiles, the superseded compiled lists are deleted.
+
+Rule updates are a developer step: `scripts/update-blocker-rules.py` (network
+required; never run by the app or `make check`) reproduces the bundled files
+byte-for-byte from the manifest's recorded sources and pinned converter, or
+with `--registry-commit <sha>` regenerates them from a newer FiltersRegistry
+commit and rewrites the manifest. The release verifier's pinned manifest digest
+must then be updated by hand.
 
 Blocking materially reduces common advertising and tracking requests; it does
 not promise anonymity or eliminate first-party analytics, fingerprinting, CNAME

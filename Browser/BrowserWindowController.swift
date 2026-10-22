@@ -36,6 +36,7 @@ final class BrowserWindowController: NSWindowController,
     private let externalURLOpener: (URL) -> Bool
     private let localFileAccessAuthorizer: any LocalFileAccessAuthorizing
     private let preferences: UserDefaults
+    private let keyWindow: () -> NSWindow?
     private var addressInterpreter: AddressInterpreter
     private var searchProvider: SearchProvider
     private var bookmarkCoordinator: BookmarkCoordinator?
@@ -59,9 +60,11 @@ final class BrowserWindowController: NSWindowController,
             NSWorkspace.shared.open($0)
         },
         localFileAccessAuthorizer: (any LocalFileAccessAuthorizing)? = nil,
-        preferences: UserDefaults = BrowserLaunchConfiguration.current.defaults
+        preferences: UserDefaults = BrowserLaunchConfiguration.current.defaults,
+        keyWindow: @escaping () -> NSWindow? = { NSApp.keyWindow }
     ) {
         self.preferences = preferences
+        self.keyWindow = keyWindow
         self.searchProvider = searchProvider
         self.contentBlockingCoordinator = contentBlockingCoordinator
         self.externalURLOpener = externalURLOpener
@@ -808,6 +811,12 @@ final class BrowserWindowController: NSWindowController,
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if let action = menuItem.action,
+           Self.selectedPageActions.contains(action),
+           anotherWindowIsKey
+        {
+            return false
+        }
         switch menuItem.action {
         case #selector(goBack(_:)):
             return webView?.canGoBack == true
@@ -859,6 +868,28 @@ final class BrowserWindowController: NSWindowController,
         default:
             return true
         }
+    }
+
+    // These menu items have this controller as an explicit target, so AppKit
+    // dispatches them even while Bookmarks, Privacy, or a sheet is key. They
+    // would then act on a page the user cannot see.
+    private static let selectedPageActions: Set<Selector> = [
+        #selector(focusAddressField(_:)),
+        #selector(goBack(_:)),
+        #selector(goForward(_:)),
+        #selector(reloadOrStop(_:)),
+        #selector(reloadPage(_:)),
+        #selector(stopLoading(_:)),
+        #selector(zoomIn(_:)),
+        #selector(zoomOut(_:)),
+        #selector(resetPageZoom(_:)),
+    ]
+
+    private var anotherWindowIsKey: Bool {
+        guard let keyWindow = keyWindow() else {
+            return false
+        }
+        return keyWindow !== window
     }
 
     func controlTextDidBeginEditing(_ notification: Notification) {
@@ -1184,7 +1215,6 @@ final class BrowserWindowController: NSWindowController,
         chromeView.errorView.update(
             title: errorState.title,
             message: errorState.message,
-            host: nil,
             recoveryActionTitle: errorState.recoveryActionTitle
         )
         chromeView.errorView.isHidden = false
@@ -1219,7 +1249,7 @@ final class BrowserWindowController: NSWindowController,
         bookmarkManagerWindowController?.refreshCurrentPageAvailability()
     }
 
-    private func websiteDataPrivacyManager()
+    func websiteDataPrivacyManager()
         -> WebsiteDataPrivacyWindowController
     {
         if let websiteDataPrivacyWindowController {
@@ -1334,7 +1364,7 @@ final class BrowserWindowController: NSWindowController,
 
         updatePrivacyBlockingResetState(
             isBusy: true,
-            statusMessage: "Deleting compiled blocking rules…"
+            statusMessage: Self.compiledBlockerResetInProgressMessage
         )
         compiledBlockerResetTask = Task { [weak self] in
             guard let self else {
@@ -1373,15 +1403,23 @@ final class BrowserWindowController: NSWindowController,
         guard let manager = websiteDataPrivacyWindowController else {
             return
         }
+        // A running compiled-rule reset keeps the window busy even when another
+        // blocking action, such as a site toggle, refreshes this state.
+        let isResettingCompiledRules = compiledBlockerResetTask != nil
         manager.updateBlockingResetState(
             exceptionCount: contentBlockingCoordinator?.siteExceptionCount ?? 0,
             canResetCompiledArtifacts: contentBlockingCoordinator?
                 .canResetCompiledArtifacts == true
                 && !compiledBlockerArtifactsWereReset,
-            isBusy: isBusy,
-            statusMessage: statusMessage
+            isBusy: isBusy || isResettingCompiledRules,
+            statusMessage: isResettingCompiledRules && statusMessage == nil
+                ? Self.compiledBlockerResetInProgressMessage
+                : statusMessage
         )
     }
+
+    private static let compiledBlockerResetInProgressMessage =
+        "Deleting compiled blocking rules…"
 
     private static func compiledBlockerResetFailureMessage(
         _ error: Error

@@ -68,6 +68,7 @@ mkdir -p "$project_root/.build"
 output_directory=$(
     mktemp -d "$project_root/.build/ResourceBaseline.v${view_count}.XXXXXX"
 )
+"$project_root/scripts/prune-results.sh" "ResourceBaseline.v${view_count}"
 fixture_pid=""
 browser_pid=""
 helper_pids=""
@@ -189,7 +190,7 @@ if [ "$view_count" -eq 10 ]; then
     fixture_pid=$!
 
     attempt=0
-    until /usr/bin/curl --fail --silent --show-error \
+    until /usr/bin/curl --fail --silent --connect-timeout 1 --max-time 2 --show-error \
         "http://127.0.0.1:$fixture_port/health?token=$fixture_token" \
         >/dev/null
     do
@@ -224,7 +225,7 @@ wait_for_fixture_views() {
     sample_prefix=$1
     attempt=0
     while [ "$attempt" -lt 100 ]; do
-        if /usr/bin/curl --fail --silent --show-error \
+        if /usr/bin/curl --fail --silent --connect-timeout 1 --max-time 2 --show-error \
             "http://127.0.0.1:$fixture_port/stats" \
             >"$sample_prefix.fixture-stats.json" && \
             /usr/bin/python3 -c \
@@ -262,7 +263,7 @@ discover_helpers() {
     webkit_pids >"${sample_prefix}.webkit-before.txt"
     webkit_processes >"${sample_prefix}.webkit-before-processes.txt"
     if [ "$view_count" -eq 10 ]; then
-        /usr/bin/curl --fail --silent --show-error \
+        /usr/bin/curl --fail --silent --connect-timeout 1 --max-time 2 --show-error \
             "http://127.0.0.1:$fixture_port/reset" >/dev/null
     fi
     launch_browser "${sample_prefix}.browser.log"

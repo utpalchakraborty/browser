@@ -266,7 +266,6 @@ final class BrowserErrorView: NSView {
 
     private let titleLabel = NSTextField(labelWithString: "")
     private let messageLabel = NSTextField(wrappingLabelWithString: "")
-    private let hostLabel = NSTextField(labelWithString: "")
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -298,12 +297,6 @@ final class BrowserErrorView: NSView {
         messageLabel.maximumNumberOfLines = 3
         messageLabel.setAccessibilityIdentifier("BrowserErrorMessage")
 
-        hostLabel.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
-        hostLabel.textColor = .tertiaryLabelColor
-        hostLabel.alignment = .center
-        hostLabel.lineBreakMode = .byTruncatingMiddle
-        hostLabel.setAccessibilityIdentifier("BrowserErrorHost")
-
         retryButton.bezelStyle = .rounded
         retryButton.setAccessibilityIdentifier("BrowserErrorReloadButton")
 
@@ -311,19 +304,17 @@ final class BrowserErrorView: NSView {
             icon,
             titleLabel,
             messageLabel,
-            hostLabel,
             retryButton,
         ])
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.orientation = .vertical
         stack.alignment = .centerX
         stack.spacing = 12
-        stack.setCustomSpacing(18, after: hostLabel)
+        stack.setCustomSpacing(18, after: messageLabel)
         addSubview(stack)
         setAccessibilityChildren([
             titleLabel,
             messageLabel,
-            hostLabel,
             retryButton,
         ])
 
@@ -331,7 +322,6 @@ final class BrowserErrorView: NSView {
             icon.widthAnchor.constraint(equalToConstant: 40),
             icon.heightAnchor.constraint(equalToConstant: 40),
             messageLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 520),
-            hostLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 520),
             stack.centerXAnchor.constraint(equalTo: centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -20),
             stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 40),
@@ -347,13 +337,10 @@ final class BrowserErrorView: NSView {
     func update(
         title: String,
         message: String,
-        host: String?,
         recoveryActionTitle: String?
     ) {
         titleLabel.stringValue = title
         messageLabel.stringValue = message
-        hostLabel.stringValue = host ?? ""
-        hostLabel.isHidden = host?.isEmpty != false
         retryButton.title = recoveryActionTitle ?? "Try Again"
         retryButton.isHidden = recoveryActionTitle == nil
         setAccessibilityLabel(title)

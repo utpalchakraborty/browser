@@ -9,7 +9,7 @@ private struct ContentBlockerSitePolicyState: Codable {
 
 @MainActor
 final class ContentBlockerSitePolicyStore {
-    private static let defaultKey = "contentBlocker.siteExceptions"
+    private static let defaultKey = "contentBlocker.sitePolicy"
 
     private let defaults: UserDefaults
     private let key: String

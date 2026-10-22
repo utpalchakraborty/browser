@@ -3,7 +3,6 @@ import AppKit
 @MainActor
 final class WebsiteDataPrivacyWindowController: NSWindowController,
     NSWindowDelegate,
-    NSSearchFieldDelegate,
     NSTableViewDataSource,
     NSTableViewDelegate
 {
@@ -238,10 +237,6 @@ final class WebsiteDataPrivacyWindowController: NSWindowController,
         renderButtons()
     }
 
-    func controlTextDidChange(_ notification: Notification) {
-        rebuildRows(preservingSelection: true)
-    }
-
     private func configureContent(in window: NSWindow) {
         guard let contentView = window.contentView else {
             return
@@ -260,7 +255,6 @@ final class WebsiteDataPrivacyWindowController: NSWindowController,
 
         searchField.placeholderString = "Search domains, cookie names, paths, or categories"
         searchField.sendsSearchStringImmediately = true
-        searchField.delegate = self
         searchField.target = self
         searchField.action = #selector(searchChanged(_:))
         searchField.setAccessibilityIdentifier("BrowserPrivacySearchField")

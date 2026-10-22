@@ -220,9 +220,7 @@ final class WebsiteDataPrivacyWindowControllerTests: XCTestCase {
             )
         )
         searchField.stringValue = secret
-        controller.controlTextDidChange(
-            Notification(name: NSControl.textDidChangeNotification, object: searchField)
-        )
+        XCTAssertTrue(searchField.sendAction(searchField.action, to: searchField.target))
         XCTAssertEqual(table.numberOfRows, 0)
     }
 

@@ -1,6 +1,22 @@
 # Project Status
 
-Last updated: 2026-10-20
+Last updated: 2026-10-22
+
+## 2026-10-22 audit remediation
+
+[Codebase review 2026-10-22](codebase-review-2026-10-22.md) found 14 issues. The owner accepted HTTPS-only loading beyond local addresses (IN-01) and the current dotted-search behavior (BE-01). The owner asked for the rest except the cookie-identity issue (FE-01, still open). What changed:
+
+- Same-document navigation (`pushState`, Back/Forward between history entries, repeated anchor clicks) no longer leaves a tab "navigating", which had disabled the site-blocking toggle.
+- Page shortcuts no longer act on the hidden browser window while Bookmarks or Privacy is key.
+- Links get "Open Link in New Tab" (background), and WebKit's dead new-window and download items are removed.
+- The Privacy busy state survives a site toggle during a compiled-rule reset.
+- Superseded compiled rule lists are deleted after a rule update, and `scripts/update-blocker-rules.py` reproduces or regenerates the bundled rules.
+- Test runs keep three result directories per kind (`make clean-results`) and remove test-created WebKit stores.
+- Each run checks that every test class is selected by exactly one scheme.
+- Runners cancel on terminal hangup and time out silent fixtures.
+- The release gate parses hardened-runtime flags exactly.
+
+`make check` passed. Debug and Release background suites each ran **194 tests with zero failures**, and the production Release package verified. All ten new regression tests fail with their fixes neutralized. Interactive suites, a live context-menu check, and a real-converter rule reproduction were not run.
 
 ## Bookmarks sidebar
 

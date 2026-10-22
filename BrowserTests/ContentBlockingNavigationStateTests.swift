@@ -25,10 +25,17 @@ final class ContentBlockingNavigationStateTests: XCTestCase {
                 to: base
             )
         )
-        XCTAssertFalse(
+        // A second click on the link already shown scrolls within the document.
+        XCTAssertTrue(
             ContentBlockingNavigationURL.isFragmentOnlyNavigation(
                 from: first,
                 to: first
+            )
+        )
+        XCTAssertFalse(
+            ContentBlockingNavigationURL.isFragmentOnlyNavigation(
+                from: base,
+                to: base
             )
         )
         XCTAssertFalse(

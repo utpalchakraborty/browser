@@ -9,6 +9,7 @@ mkdir -p "$project_root/.build"
 output_directory=$(
     mktemp -d "$project_root/.build/ActualAppProfileProbe.XXXXXX"
 )
+"$project_root/scripts/prune-results.sh" ActualAppProfileProbe
 fixture_log="$output_directory/fixture-server.log"
 fixture_token=${output_directory##*.}
 
@@ -26,7 +27,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 attempt=0
-until /usr/bin/curl --fail --silent \
+until /usr/bin/curl --fail --silent --connect-timeout 1 --max-time 2 \
     "http://127.0.0.1:$fixture_port/health?token=$fixture_token" \
     >/dev/null 2>&1
 do
